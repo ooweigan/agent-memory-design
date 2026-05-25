@@ -151,7 +151,9 @@ function processMath(src) {
   src = src.replace(/\n{3,}/g, '\n\n');
 
   // Step 3: Protect inline math $...$ (not $$, not inside words)
-  src = src.replace(/(?<!\$)\$(?!\$)((?:[^$\\]|\\.)+?)\$(?!\$)/g, (match, math) => {
+  // Disallow newlines inside the match so an unclosed `$` can only affect its
+  // own line — it can never swallow blank lines, headings, or later paragraphs.
+  src = src.replace(/(?<!\$)\$(?!\$)((?:[^$\\\n]|\\.)+?)\$(?!\$)/g, (match, math) => {
     const idx = inlineMath.length;
     inlineMath.push(math);
     return `<!--MATH_INLINE_${idx}-->`;

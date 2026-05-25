@@ -288,7 +288,7 @@ $$\text{Score}(m) = w_1 \cdot \text{Recency} + w_2 \cdot \text{Importance} + w_3
 
 
 
-Rate-distortion 理论再次提供了理论支撑 [[29]](#ref-29)。遗忘本质上是一种有损压缩：将记忆库从 $\mathcal{M}$ 压缩到 $\mathcal{M}'$（$|\mathcal{M}'|
+Rate-distortion 理论再次提供了理论支撑 [[29]](#ref-29)。遗忘本质上是一种有损压缩：将记忆库从 $\mathcal{M}$ 压缩到 $\mathcal{M}'$（$|\mathcal{M}'| < |\mathcal{M}|$），目标是在给定的存储预算下最小化任务相关信息的失真。
 
 
 
