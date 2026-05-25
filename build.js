@@ -126,22 +126,35 @@ function processCustomHeadingIds(src) {
 }
 
 function processMath(src) {
-  // Protect display math $$...$$ from markdown processing using raw HTML blocks
-  // marked passes through raw HTML blocks untouched
   const displayMath = [];
-  src = src.replace(/\$\$([\s\S]*?)\$\$/g, (match, math) => {
+  const inlineMath = [];
+
+  // Step 1: Protect display math $$...$$ FIRST (before inline)
+  // Use HTML comment placeholders — marked treats them as block-level HTML
+  // and won't wrap them in <p> tags
+  src = src.replace(/^[ \t]*\$\$[ \t]*\n([\s\S]*?)\n[ \t]*\$\$[ \t]*$/gm, (match, math) => {
     const idx = displayMath.length;
-    displayMath.push(math);
-    // Use a raw HTML block marker that marked will pass through
-    return `\n<div class="math-block" data-math-idx="${idx}"></div>\n`;
+    displayMath.push(math.trim());
+    return `<!--MATH_BLOCK_${idx}-->`;
   });
 
-  // Protect inline math $...$ (not $$) using HTML spans
-  const inlineMath = [];
-  src = src.replace(/(?<!\$)\$(?!\$)(.+?)(?<!\$)\$(?!\$)/g, (match, math) => {
+  // Also handle single-line display math $$...$$
+  src = src.replace(/\$\$([\s\S]*?)\$\$/g, (match, math) => {
+    // Skip if it's already been replaced (contains MATH_BLOCK_)
+    if (math.includes('MATH_BLOCK_')) return match;
+    const idx = displayMath.length;
+    displayMath.push(math.trim());
+    return `<!--MATH_BLOCK_${idx}-->`;
+  });
+
+  // Step 2: Collapse multiple consecutive blank lines
+  src = src.replace(/\n{3,}/g, '\n\n');
+
+  // Step 3: Protect inline math $...$ (not $$, not inside words)
+  src = src.replace(/(?<!\$)\$(?!\$)((?:[^$\\]|\\.)+?)\$(?!\$)/g, (match, math) => {
     const idx = inlineMath.length;
     inlineMath.push(math);
-    return `<span class="math" data-math-idx="${idx}"></span>`;
+    return `<!--MATH_INLINE_${idx}-->`;
   });
 
   return { src, displayMath, inlineMath };
@@ -149,18 +162,14 @@ function processMath(src) {
 
 function restoreMath(html, displayMath, inlineMath) {
   for (let i = 0; i < displayMath.length; i++) {
-    const marker = '<div class="math-block" data-math-idx="' + i + '"></div>';
+    const marker = '<!--MATH_BLOCK_' + i + '-->';
     const content = displayMath[i];
-    html = html.replace(marker, function() {
-      return '<div class="math-block">$$' + content + '$$</div>';
-    });
+    html = html.replace(marker, () => '<div class="math-block">\n$$\n' + content + '\n$$\n</div>');
   }
   for (let i = 0; i < inlineMath.length; i++) {
-    const marker = '<span class="math" data-math-idx="' + i + '"></span>';
+    const marker = '<!--MATH_INLINE_' + i + '-->';
     const content = inlineMath[i];
-    html = html.replace(marker, function() {
-      return '<span class="math">$' + content + '$</span>';
-    });
+    html = html.replace(marker, () => '<span class="math">$' + content + '$</span>');
   }
   return html;
 }

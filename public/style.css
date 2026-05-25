@@ -888,3 +888,22 @@ pre, code, input, textarea {
   letter-spacing: inherit;
   line-height: inherit;
 }
+
+/* ============================================
+   Math Rendering (KaTeX)
+   ============================================ */
+
+.math-block {
+  overflow-x: auto;
+  margin: 1.5em 0;
+  padding: 16px 0;
+  text-align: center;
+}
+
+.math-block .katex-display {
+  margin: 0;
+}
+
+span.math .katex {
+  font-size: 1.05em;
+}
