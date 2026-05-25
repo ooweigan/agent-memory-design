@@ -248,6 +248,13 @@ function buildChapter(chapterNum, chaptersData) {
   const { meta, content } = parseFrontMatter(raw);
   const { body, referencesHtml } = extractReferences(content);
 
+  // Lint: an unclosed code fence silently turns the rest of the document into a
+  // code block. Warn loudly so this class of corruption can't slip through.
+  const fenceCount = (body.match(/^```/gm) || []).length;
+  if (fenceCount % 2 !== 0) {
+    log(`  ⚠ ${chapterInfo.file}: odd number of \`\`\` code fences (${fenceCount}) — likely an unclosed code block`);
+  }
+
   // Build HTML content from markdown body
   const contentHtml = markdownToHtml(body);
 

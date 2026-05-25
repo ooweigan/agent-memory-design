@@ -222,7 +222,22 @@ conf > τ_high  且 conflict=false → believed
 conf ∈ [ε, τ_high] 且 conflict=false → possible
 conflict=true                    → disputed
 所有支持证据被 supersede         → refuted
-conf [[14]](#ref-14) 的核心性质是——每个算子的输入和输出都是关系（relation），这使得算子可以自由组合嵌套。同样，我们的 derive 函数输入输出形状不变，使得不同 cognitive type 的 facet 可以在同一管道中自由流转。
+conf < ε 且 conflict=false       → forgotten（投影不可见）
+```
+
+这层映射显式做出来，下游消费方可以直接按 modality 路由（"对 disputed 的事项触发人工审核"），不需要每次重新解释 `(0.5, true)` 的业务含义。
+
+
+
+### 2.3.5 类型驱动的派生：shape-preserving polymorphism {#s2-3-5}
+
+
+
+四轴交叉给出一个 facet 的类型签名。每个类型签名挂载一组纯函数：`derive`（如何从证据算当前值）、`decay`（如何随时间衰减）、`project`（如何在给定预算下呈现）。所有这些函数的形状是统一的——输入是证据集，输出是 `(content, confidence, conflict, modality)`。形状不变意味着不同类型之间可以放在同一管道里做衰减、比较、合并，不用为每种类型特化基础设施。
+
+
+
+这个设计与关系代数的**闭包性**（closure）同构：Codd 的五个基本算子（σ, π, ×, ∪, −）[[14]](#ref-14) 的核心性质是——每个算子的输入和输出都是关系（relation），这使得算子可以自由组合嵌套。同样，我们的 derive 函数输入输出形状不变，使得不同 cognitive type 的 facet 可以在同一管道中自由流转。
 
 
 

@@ -227,7 +227,16 @@ BM25 锁定精确实体，语义检索扩展相关上下文——两路互补。
 ```
 ⊕_budget(B, scorer):
   selected = ∅
-  while token_budget(selected)
+  while token_budget(selected) < B and candidates ≠ ∅:
+    m* = argmax_{m ∈ candidates} marginal_value(m, selected, scorer)
+    selected = selected ∪ {m*}
+    candidates = candidates \ {m*}
+  return selected
+```
+
+
+
+其中 `marginal_value(m, selected, scorer) = scorer(m) - redundancy(m, selected)`。冗余度惩罚保证了选中子集的多样性——与已选 facet 高度重叠的新 facet，其边际价值被自动折减。这与信息论中的率失真理论（rate-distortion theory）有深层联系：在有限的"率"（token 预算）下最小化"失真"（任务相关信息的损失），`⊕_budget` 本质上是在记忆检索场景下求解率失真函数 R(D) 的一个贪心近似。
 
 
 
