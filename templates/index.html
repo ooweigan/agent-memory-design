@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{TITLE}} — 系列首页</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <section class="hero">
+    <h1 class="hero__title">{{TITLE}}</h1>
+    <p class="hero__subtitle">{{SUBTITLE}}</p>
+    <p class="hero__meta" style="margin-top: 24px; font-size: 16px; color: var(--color-text-secondary);">{{AUTHOR}} · {{DATE}}</p>
+  </section>
+
+  <section class="section">
+    <div class="chapters-grid">
+{{CHAPTERS}}
+    </div>
+  </section>
+
+  <script src="script.js"></script>
+</body>
+</html>

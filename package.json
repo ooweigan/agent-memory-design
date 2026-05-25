@@ -1,0 +1,13 @@
+{
+  "name": "agent-memory-blog",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "node build.js --watch",
+    "build": "node build.js",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "marked": "^12.0.0"
+  }
+}

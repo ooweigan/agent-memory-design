@@ -1,0 +1,56 @@
+{
+  "title": "Agent 记忆系统",
+  "subtitle": "从 Living Document 到可复用基础设施",
+  "author": "程乾",
+  "date": "2026",
+  "chapters": [
+    {
+      "number": 1,
+      "file": "chapter-1.md",
+      "title": "记忆不是存储",
+      "fullTitle": "记忆不是存储——定义问题与建立隐喻",
+      "excerpt": "从客服 Agent 的三个记忆时刻出发，借助认知心理学理论论证 Agent 记忆的本质是 Living Document of Beliefs。",
+      "readingTime": "8"
+    },
+    {
+      "number": 2,
+      "file": "chapter-2.md",
+      "title": "三层分离的必然性",
+      "fullTitle": "三层分离的必然性——为什么内核、类型、策略必须正交",
+      "excerpt": "从四条硬约束推导出 L0 内核基质、L1 类型系统、L2 策略平面的三层正交架构。",
+      "readingTime": "12"
+    },
+    {
+      "number": 3,
+      "file": "chapter-3.md",
+      "title": "统一价值函数",
+      "fullTitle": "统一价值函数——记与忘的同一把尺",
+      "excerpt": "用 MDP、信息论、预测编码理论形式化记什么、怎么记、什么时候记、什么时候挤。",
+      "readingTime": "10"
+    },
+    {
+      "number": 4,
+      "file": "chapter-4.md",
+      "title": "外部锚定与压缩边界",
+      "fullTitle": "外部锚定与压缩边界——R_task 为什么必须从外面来",
+      "excerpt": "Goodhart 定律证明价值信号必须从 R_task 外部锚定，压缩必须是向上派生而非向下擦除。",
+      "readingTime": "8"
+    },
+    {
+      "number": 5,
+      "file": "chapter-5.md",
+      "title": "Recall as Algebra",
+      "fullTitle": "Recall as Algebra——读路径的代数化与预算化召回",
+      "excerpt": "借鉴 Codd 关系代数，将记忆检索设计为可组合的算子集合。",
+      "readingTime": "8"
+    },
+    {
+      "number": 6,
+      "file": "chapter-6.md",
+      "title": "边界与开放问题",
+      "fullTitle": "边界与开放问题——诚实标注框架的极限",
+      "excerpt": "诚实标注框架的极限：实体共指、procedural 形态、多 Agent 归因等九大开放问题。",
+      "readingTime": "12"
+    }
+  ]
+}

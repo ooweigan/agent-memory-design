@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>三层分离的必然性 — Agent 记忆系统</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="progress-bar"></div>
+  <nav class="article-nav">
+    <a href="index.html" class="article-nav__back">返回系列</a>
+    <span class="article-nav__title">三层分离的必然性</span>
+    <button class="nav-toggle" aria-label="菜单" aria-expanded="false">
+      <span class="nav-toggle__bar"></span>
+      <span class="nav-toggle__bar"></span>
+      <span class="nav-toggle__bar"></span>
+    </button>
+  </nav>
+
+  <header class="article-hero">
+    <span class="article-hero__chapter">第二章</span>
+    <h1 class="article-hero__title">三层分离的必然性——为什么内核、类型、策略必须正交</h1>
+    <p class="article-hero__meta">程乾 · 2026-05-24 · 约 12 分钟</p>
+  </header>
+
+  <div class="article-layout">
+    <aside class="article-layout__sidebar">
+      <nav class="toc">
+        <p class="toc__title">目录</p>
+        <ul class="toc__list">
+          <li><a href="#s2-1">2.1 从四条约束推导三层职责</a></li>
+          <li><a href="#s2-2">2.2 L0 内核基质</a></li>
+          <li><a href="#s2-3">2.3 L1 类型系统</a></li>
+          <li class="toc-indent"><a href="#s2-3-1">2.3.1 认知类型</a></li>
+          <li class="toc-indent"><a href="#s2-3-2">2.3.2 实体本体</a></li>
+          <li class="toc-indent"><a href="#s2-3-3">2.3.3 双时间</a></li>
+          <li class="toc-indent"><a href="#s2-3-4">2.3.4 信念模态</a></li>
+          <li class="toc-indent"><a href="#s2-3-5">2.3.5 类型驱动的派生</a></li>
+          <li><a href="#s2-4">2.4 L2 策略平面</a></li>
+          <li class="toc-indent"><a href="#s2-4-1">2.4.1 四个策略接口</a></li>
+          <li class="toc-indent"><a href="#s2-4-2">2.4.2 策略的纯函数性质</a></li>
+          <li><a href="#s2-5">2.5 三层分离的工程意义</a></li>
+          <li><a href="#s2-6">2.6 压缩必须是"向上派生"而非"向下擦除"</a></li>
+          <li><a href="#s2-7">2.7 本章小结</a></li>
+          <li><a href="#references">参考文献</a></li>
+        </ul>
+      </nav>
+    </aside>
+
+    <main class="article-layout__content">
+
+      <section id="s2-1">
+        <h2>2.1 从四条约束推导三层职责</h2>
+
+        <p>第1章的四条约束不是可以分别满足的独立需求，而是对同一个系统的正交要求。如果试图在一个扁平的结构里同时满足它们，架构会迅速失控——每当你想加一种新的认知类型或换一种价值函数，就得改动核心存储逻辑。正确的做法是把约束分配到不同的抽象层级，让每一层只承担它必须承担的责任。</p>
+
+        <p>这个推导方法本身有坚实的软件工程理论基础。Parnas 在 1972 年的经典论文《On the Criteria To Be Used in Decomposing Systems into Modules》<sup><a href="#ref-13">[13]</a></sup> 中提出了<strong>信息隐藏</strong>原则：模块化分解应该按照"哪些设计决策最可能变化"来切分，而不是按照处理流程的步骤来切分。每个模块隐藏一个它独有的设计决策，对外暴露尽可能少的接口。这个原则直接指导了我们的三层分解——存储不变量（L0）、认知类型（L1）、业务策略（L2）是三个<strong>最可能独立变化</strong>的维度，因此它们必须被正交分离。</p>
+
+        <p><strong>C1 "必须能回答为什么相信" → 证据链不可变 → L0 的 Record 不可变 + 派生可重算。</strong></p>
+
+        <p>"为什么相信"的答案永远是一组证据的引用。如果证据本身可以被修改或删除，追溯就失去了 ground truth。因此，底层存储必须是 append-only 的：所有观察以不可变 Record 的形式进入系统。任何信念都不是直接写入的，而是从这些 Record 中派生出来的——并且这种派生必须是可重算的，也就是给定同一组证据，任意时刻重新执行派生函数都应得到一致的结果。这就是 L0 的第一组不变量：Record 不可变，Memory 是派生。</p>
+
+        <p>这里的"不可变"有来自多个独立理论传统的支撑。Helland 在 CIDR 2015 的论文《Immutability Changes Everything》<sup><a href="#ref-16">[16]</a></sup> 中用一句话概括了核心论点："<strong>Accountants don't use erasers</strong>"——会计系统天然是 append-only 的，账本是事实来源，错误通过追加"冲正条目"修正而非擦除原始记录。这与我们的"仲裁即证据"不变量完全同构。从事件溯源 <sup><a href="#ref-12">[12]</a></sup> 到 Git 的 commit graph，从 LSM-Tree 的 WAL <sup><a href="#ref-15">[15]</a></sup> 到数据库的 MVCC，不可变性在系统架构的每一层都以不同形式出现——它的核心价值是<strong>消除写路径上的协调开销</strong>（零竞争条件）和<strong>提供完整审计轨迹</strong>。</p>
+
+        <p><strong>C2 "必须能修正而非覆盖" → 矛盾证据必须并存 → L0 的永不拒写 + 仲裁即证据。</strong></p>
+
+        <p>修正意味着当新旧证据矛盾时，系统不能简单地用新覆盖旧，也不能因为"这条证据质量差"就拒绝写入。每条观察证据都必须落地，质量差异通过置信度表达，不通过准入门控表达——这是"永不拒写"。当矛盾需要被解决时，裁决本身不是覆盖式改写，而是追加一条新的"裁决证据"，对败方证据打上 supersededAt 标记——这是"仲裁即证据"。两者共同保证了修正行为的可追溯性。</p>
+
+        <p><strong>C3 "必须能回看历史状态" → 时间作为一等公民 → L1 的 bitemporal。</strong></p>
+
+        <p>回看历史状态需要两套时间：valid_time 记录"这件事在世界上的哪个时间段为真"，transaction_time 记录"系统在哪个时刻知道了这件事"。只用一套时间会出两种典型错误——只用 transaction_time 会把"过去式知识"当成"当前知识"，只用 valid_time 则无法回答"我们当时为什么没做出正确判断"。这两条时间线必须在类型系统层被显式建模，而不是藏在应用逻辑里。</p>
+
+        <p>Bitemporal 数据模型的理论基础来自 Snodgrass 在 1999 年的专著 <em>Developing Time-Oriented Database Applications in SQL</em> <sup><a href="#ref-11">[11]</a></sup>，其中明确定义了 valid_time（事实为真的时间）和 transaction_time（事实被记录的时间）的正交关系。SQL:2011 标准正式引入了 temporal table 支持。bitemporal 的存储开销约为非时序方案的 2-4 倍（每次更新产生新版本行），但它提供了<strong>任意历史时刻的精确回看能力</strong>——这在审计和合规场景下是不可替代的。</p>
+
+        <p><strong>C4 "必须在有限窗口内择优投影" → 需要价值函数做取舍 → L2 的必然性。</strong></p>
+
+        <p>有限的上下文窗口意味着记忆系统必须做取舍——哪些认知该被装进当前 prompt，哪些该被省略。取舍需要一把价值标尺，而价值标尺的定义取决于 Agent 当前的任务目标：客服场景的关键指标是问题解决率，编程场景的关键指标是交付正确率，会议纪要场景的关键指标是决策召回率。不同的任务有不同的价值定义，这意味着价值函数不能被写死在存储层或类型层。必须有一个独立的策略层来承载它，并且允许它在不同场景下被替换。这就是 L2 策略平面的存在理由。</p>
+
+        <p>这四条推导的共同结论是：<strong>三层不是架构师设计的，是约束推导出来的。</strong> 任何认真对待这四条约束的系统，其架构都会收敛到类似的分离。正如 Codd 的关系代数之于业务数据库、LSM-Tree 之于 KV 存储、Unix 文件系统之于应用——干净的内核 + 可组合的算子 + 可替换的策略——这个模式在系统架构史上反复出现。</p>
+      </section>
+
+      <section id="s2-2">
+        <h2>2.2 L0 内核基质：认知存储的最小不变量</h2>
+
+        <p>L0 的设计原则是"去除领域、去除认知、去除策略，只留'如何无损存储认知证据'这件事"。任何要承载"持续观察、长期演化、可审计、可修订"的认知系统，无论它承载的是客服记忆、个人助理、还是科研假说追踪，都必然要满足以下五条不变量。它们与"认知是关于人还是物"无关，与"是 episodic 还是 semantic"无关。</p>
+
+        <p><strong>不变量 1：Record 不可变。</strong> 一切外部事件以 append-only 形式进入 Record ledger。这借鉴了事件溯源的核心理念 <sup><a href="#ref-12">[12]</a></sup>，但应用到认知场景：一条 Record 可以是一封邮件的到达、一条聊天消息、一次用户反馈、一次系统动作。写入后不可修改、不可删除。这是所有上层派生的 ground truth。</p>
+
+        <p>在工程实现上，Record 的不可变性可以借助 LSM-Tree 的 WAL（Write-Ahead Log）机制保证：所有写入先进 WAL，再进 memtable，WAL 本身是 append-only 的 <sup><a href="#ref-15">[15]</a></sup>。Helland 的"不可变性五层塔"（hardware → filesystem → database → application → distributed）<sup><a href="#ref-16">[16]</a></sup> 告诉我们，不可变性不是某一层的特技，而是在每一层都有对应实现——SSD 的 wear leveling、Btrfs/ZFS 的 COW snapshot、数据库的 MVCC、应用层的 event sourcing、分布式层的 replication log。Record 不可变是这条普遍原则在认知存储场景的实例化。</p>
+
+        <p><strong>不变量 2：Memory 是派生。</strong> 任何信念（facet）的当前值都可以、且必须能够从其证据集重新计算出来。这不是说系统每次都实时重算——可以缓存计算结果——而是说缓存和源数据之间的派生关系是显式的、可追溯的。如果缓存丢失或受到质疑，系统可以自信地说：给我证据，我可以重新算出这个信念。</p>
+
+        <p>这个不变量与数据库理论中的 <strong>materialized view</strong>（物化视图）概念直接对应 <sup><a href="#ref-17">[17]</a></sup>：物化视图是从基表通过查询定义预计算并存储的结果，当基表变化时视图可以被刷新。在 Agent 记忆中，facet 就是 Record 的物化视图——它的定义是 derive 函数，基表是 evidence 子表。物化视图理论中的 <strong>增量维护</strong>（incremental view maintenance, IVM）技术——只计算 delta 而非全量重算——直接适用于 facet 的增量更新。</p>
+
+        <p><strong>不变量 3：证据集而非计数器。</strong> 信念的"被印证强度"用一个独立的证据子表表达，每行由 <code>(facetId, sourceType, sourceId)</code> 唯一约束，而不是一个简单的 +1/-1 整数。这两个设计的区别在于幂等性：如果用计数器，同一条 Record 被重复处理两次会导致权重翻倍；如果用 UNIQUE 约束的证据子表，重复写入自动被 DB 层拒绝。在分布式或异步重试场景下，这条下沉到数据库层的幂等保证是"重读、重投、并发写都不改变证据集真值"的根基。</p>
+
+        <p>这个设计与关系代数的<strong>集合语义</strong>一脉相承：Codd 在 1970 年的关系模型 <sup><a href="#ref-14">[14]</a></sup> 中规定关系是元组的集合（无重复、无序），UNIQUE 约束正是集合语义在 SQL 中的实现。证据子表的 UNIQUE 约束保证了每条证据只被计数一次——这是关系模型的集合语义在认知存储中的自然应用。</p>
+
+        <p><strong>不变量 4：永不拒写。</strong> 候选认知进入派生流水线后，无论质量如何都必须落地。质量通过 confidence 表达，不通过 gating 表达。入口处设质量门控看似合理，实际隐患极大：门控判断本身可能出错（LLM 误判一条关键信息为"低质量"），而一旦拒写，原始证据就永久丢失了，没有任何回溯补救的可能。永不拒写把门控从"删掉差的"转为"标注差的"——差的认知以低置信度存在，投影时可以被省略，但证据本身永远可查。沉默失败比拒写更危险：当 Extract 管道因 JSON parse 失败静默丢弃数据时，系统把"我没有工作"翻译成了"无事发生"。因此，永不拒写需要 transcript fallback 兜底——当结构化蒸馏失败时，至少保留原始 Record 作为 ground truth。</p>
+
+        <p><strong>不变量 5：仲裁即证据。</strong> 当人机交互或自动推理需要对矛盾做出裁决时，裁决动作不是覆盖式改写旧信念，而是追加一条新的特殊证据（sourceType='arbitration'），对败方证据打上 supersededAt 标记。这改变了裁决的哲学地位：裁决不是"宣布真理"，而是"增加一条支持某一方的证据"。它保留了败方证据的可查性（合规审计能看到"系统当时考虑了什么"），也让未来可能的翻案有路可退。</p>
+
+        <p>五条不变量的共同主题是：<strong>让一切不可逆操作都变成可逆的证据追加。</strong> 删除变成 supersede，判断变成仲裁证据，拒写变成低置信度保留，覆盖变成新证据派生。这个转化是把记忆系统从"CRUD 式事实管理"扭向"事件溯源式认知管理"的关键。</p>
+      </section>
+
+      <section id="s2-3">
+        <h2>2.3 L1 类型系统：让 facet 成为可被类型化的对象</h2>
+
+        <p>如果说 L0 是"认知场景下的 PostgreSQL + WAL"，那么 L1 就是它的 schema 层——不是定义有哪些表和字段，而是定义认知本身有哪些正交的维度。</p>
+
+        <h3 id="s2-3-1">2.3.1 第一轴：cognitive type（认知类型）</h3>
+
+        <p>不同类型的记忆有不同的派生逻辑、衰减曲线和投影策略。这个分层有来自认知心理学的直接理论根据。Tulving 的记忆分类学 <sup><a href="#ref-1">[1]</a></sup> 将长期记忆分为 episodic（个人经历的具体事件）和 semantic（一般性知识），后续研究补充了 procedural（技能和习惯）。Baddeley 的工作记忆模型 <sup><a href="#ref-2">[2]</a></sup> 则从短期处理的角度区分了不同的子系统。我们将这些认知分类<strong>收敛到工程可操作的五种</strong>：</p>
+
+        <table>
+          <thead>
+            <tr>
+              <th>类型</th>
+              <th>表达内容</th>
+              <th>认知心理学对应</th>
+              <th>典型 derive 行为</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Episodic</strong></td>
+              <td>某时某地发生了什么</td>
+              <td>Tulving 的 episodic memory: what-where-when + autonoetic consciousness</td>
+              <td>强时间索引，原子性高，少融合</td>
+            </tr>
+            <tr>
+              <td><strong>Semantic</strong></td>
+              <td>某个客体的稳定属性</td>
+              <td>Tulving 的 semantic memory: detached facts + noetic consciousness</td>
+              <td>多证据融合，矛盾需要裁决</td>
+            </tr>
+            <tr>
+              <td><strong>Procedural</strong></td>
+              <td>怎样完成某类任务</td>
+              <td>Procedural memory: implicit skill knowledge</td>
+              <td>成功/失败计数，慢变</td>
+            </tr>
+            <tr>
+              <td><strong>Social/Relational</strong></td>
+              <td>主体间互动模式</td>
+              <td>无直接对应，类似 episodic 的 social extension</td>
+              <td>主观视角，与观察者绑定</td>
+            </tr>
+            <tr>
+              <td><strong>Reflective</strong></td>
+              <td>模式、归因、教训</td>
+              <td>类似 schema 的高阶抽象（Bartlett）</td>
+              <td>高阶派生，引用其他 facet 作为证据</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>值得单独点名的是 <strong>Reflective</strong>：它是"压缩即智能"的工程承载位置。一条 reflective facet 的证据不是原始 Record，而是它所归纳的下层 facet 的引用。这意味着 reflective 层是一个"派生于派生"的二阶建筑——但它的衰减、矛盾、裁决全部沿用与一阶相同的 L0 机制，只是输入从 Record 换成了 facet 引用。这种同构性让"压缩即智能"在工程上不需要引入任何新机制，只是类型系统的一次自然扩展。</p>
+
+        <p>这个设计与 CLS 理论中的 consolidation 机制形成精确映射：海马体（L0 Record）→ replay → 新皮层（L1 facet），而 reflective facet 的"派生于派生"对应新皮层中高阶 schema 的形成——从多条低阶记忆中提取跨实例的模式。</p>
+
+        <h3 id="s2-3-2">2.3.2 第二轴：entity ontology（实体本体）</h3>
+
+        <p>记忆是关于谁的？这个"谁"的范畴在不同的应用场景下完全不同。人际 CRM 场景下，实体是 User（个体）、Contact（客户）、以及两者的 Relation。知识库场景下，实体是 Concept、Document、Claim。物理 Agent 场景下，实体是 Place、Object、Event、Self。</p>
+
+        <p>L1 不预设任何一种本体。它只要求应用声明自己的实体类型，然后让 L0 按实体类型存储和索引。这意味着同一个 L0 内核可以同时承载"人际关系记忆"和"知识图谱记忆"——它们只是 entity ontology 轴上的不同实例化。</p>
+
+        <p>这个设计选择的理论依据是 Codd 的关系模型 <sup><a href="#ref-14">[14]</a></sup> 中的<strong>物理数据独立性</strong>原则：逻辑 schema 与物理存储解耦。正如关系数据库不需要预先知道"你要存什么类型的业务数据"，L0 也不需要预先知道"你要管理什么类型的认知实体"。</p>
+
+        <h3 id="s2-3-3">2.3.3 第三轴：bitemporal（双时间）</h3>
+
+        <p>一个信念内容有两个时间维度需要记录：</p>
+
+        <ul>
+          <li><strong>valid_time</strong>：该信念在世界上为真的时间区间。"Hans 的付款周期为 45 天"在 2024-03 至 2026-05 期间为真。</li>
+          <li><strong>transaction_time</strong>：系统何时知道了这件事。系统在 2026-05-20 才收到那封修改邮件，在此之前系统"不知道"变化已经发生。</li>
+        </ul>
+
+        <p>只用一种时间的代价是系统性认知错误。只用 transaction_time 会把"过去式知识"当成"当前知识"——系统会认为 Hans 现在还是 45 天，因为最近一次关于付款周期的记录就是三个月前那条。只用 valid_time 则无法回答审计问题——"你们当时为什么没发现这个风险？"——因为系统无法区分"事情没发生"和"事情发生了但我们还没收到信号"。</p>
+
+        <p>Snodgrass 在 1999 年的专著 <em>Developing Time-Oriented Database Applications in SQL</em> <sup><a href="#ref-11">[11]</a></sup> 中系统化了 bitemporal 数据模型的理论基础。bitemporal 的本质是 <strong>valid_time × transaction_time 的笛卡尔积</strong>——每个元组映射到一个二维时空区域。SQL:2011 标准（ISO/IEC 9075）首次引入了对 temporal table 的原生支持：application-time period table（对应 valid time）和 system-time period table（对应 transaction time）。</p>
+
+        <p>工程实例：邮件分析场景下，Signal（观察事件）的 <code>asOf</code> 字段取邮件的 <code>receivedAt</code>——这是 valid_time 的代理。Signal 的 <code>createdAt</code> 取写入时间——这是 transaction_time。当回填历史邮件时，<code>asOf</code> 按邮件的实际时间排列，形成正确的时间序列，而 <code>createdAt</code> 如实记录回填操作发生的时间。两条时间线互不污染。</p>
+
+        <p>Zep/Graphiti <sup><a href="#ref-20">[20]</a></sup> 是现有开源方案中唯一实现了 bitemporal 的，这是它的核心架构优势。但它的 bitemporal 是作为知识图谱的一个属性附加的，而不是从"Living Document 的 C3 约束"推导出来的——这意味着当场景偏离"实体-关系"范式时，bitemporal 的集成路径不够自然。</p>
+
+        <h3 id="s2-3-4">2.3.4 第四轴：modality（信念模态）</h3>
+
+        <p>信心不是二元（信/不信）的，而是一个有结构的状态空间。至少包含：</p>
+
+        <ul>
+          <li><strong>believed</strong>：当前判断为真，有足够证据支撑</li>
+          <li><strong>doubted</strong>：有反向证据但未达到推翻的程度</li>
+          <li><strong>possible</strong>：未被否定但证据极少</li>
+          <li><strong>refuted</strong>：已被推翻（所有支持证据被 supersede）</li>
+          <li><strong>disputed</strong>：支持与反对势均力敌，等待裁决</li>
+        </ul>
+
+        <p>一个简单的 <code>(confidence, conflict)</code> 二元组可以映射到模态：</p>
+
+        <pre><code>conf > τ_high  且 conflict=false → believed
+conf ∈ [ε, τ_high] 且 conflict=false → possible
+conflict=true                    → disputed
+所有支持证据被 supersede         → refuted
+conf < ε 且 conflict=false       → forgotten (投影不可见)</code></pre>
+
+        <p>这层映射显式做出来，下游消费方可以直接按 modality 路由（"对 disputed 的事项触发人工审核"），不需要每次重新解释 <code>(0.5, true)</code> 的业务含义。</p>
+
+        <h3 id="s2-3-5">2.3.5 类型驱动的派生：shape-preserving polymorphism</h3>
+
+        <p>四轴交叉给出一个 facet 的类型签名。每个类型签名挂载一组纯函数：<code>derive</code>（如何从证据算当前值）、<code>decay</code>（如何随时间衰减）、<code>project</code>（如何在给定预算下呈现）。所有这些函数的形状是统一的——输入是证据集，输出是 <code>(content, confidence, conflict, modality)</code>。形状不变意味着不同类型之间可以放在同一管道里做衰减、比较、合并，不用为每种类型特化基础设施。</p>
+
+        <p>这个设计与关系代数的<strong>闭包性</strong>（closure）同构：Codd 的五个基本算子（σ, π, ×, ∪, −）<sup><a href="#ref-14">[14]</a></sup> 的核心性质是——每个算子的输入和输出都是关系（relation），这使得算子可以自由组合嵌套。同样，我们的 derive 函数输入输出形状不变，使得不同 cognitive type 的 facet 可以在同一管道中自由流转。</p>
+
+        <p>衰减函数的理论基础来自 Ebbinghaus 1885 年的幂函数遗忘曲线：<code>R(t) = a × t^(-b)</code>。Wixted 和 Ebbesen 在 1991 年的实验确认幂函数比指数函数更好地拟合遗忘数据。不同 cognitive type 的衰减常数可以不同——episodic 衰减快（具体事件很快失去相关性），semantic 衰减慢（稳定属性持久相关），reflective 几乎不衰减（高层模式的保质期最长）——但衰减函数的形状统一。</p>
+      </section>
+
+      <section id="s2-4">
+        <h2>2.4 L2 策略平面：四个可插拔接口</h2>
+
+        <p>L0 和 L1 回答了"如何存与派生"，但没有回答"什么时候该记、该记什么、该多详细地记、什么时候该忘"。这些是策略问题，它们的答案取决于 Agent 的任务目标，而任务目标是变化的——因此策略必须可替换。</p>
+
+        <h3 id="s2-4-1">2.4.1 四个策略接口</h3>
+
+        <ul>
+          <li><strong>record_policy</strong>：决定"是否触发 observe"。吃当前事件上下文和记忆状态，吐是否写入的决策。在 CRM 场景下，用户邮件和对话天然是高价值信号，record_policy 可以简化为"有互动就记"。在另一个场景下（比如系统日志监控），可能需要复杂的惊奇度过滤。</li>
+          <li><strong>encode_policy</strong>：决定"选哪些写、按哪种 cognitive type 写、写到什么深度"。一条"客户要求改为 30 天付款"的观察，编码为一条 semantic facet 是浅层编码；如果系统识别出这是"客户付款周期谈判模式"的一个实例，则可能向上派生一条 reflective facet。编码深度的选择是对未来检索收益与当前存储/计算成本的权衡——越深的编码检索效率越高，但写入成本也越高。</li>
+          <li><strong>forget_policy</strong>：在容量/注意力预算压力下决定"哪些 facet 在投影侧被遮蔽"。注意：遗忘不是物理删除——L0 的不变量禁止删除。遗忘是投影侧的选择性不展示。衰减型遗忘（长期未被新证据强化的信念自然降置信）和主动型遗忘（显式请求遗忘某条认知）都通过同一接口表达，区别仅在于触发信号。</li>
+          <li><strong>reflect_policy</strong>：决定"何时跑裁决、何时向上派生反思性 facet、何时重派生 Summary"。这个策略的优化目标直接借用"预测式压缩"的视角：一条反思性 facet R 值得被生成，当且仅当在加入 R 后，对未来同类事件的预测损失下降幅度大于 R 自身的描述长度成本。</li>
+        </ul>
+
+        <h3 id="s2-4-2">2.4.2 策略的纯函数性质与事件溯源的对偶</h3>
+
+        <p>四个策略都是纯函数——吃当前状态与上下文，吐动作意图，由 L1/L0 去执行。这意味着策略可以被替换（默认启发式换成 RL 控制器）、被回放（历史状态序列喂给新策略做离线评估）、被 A/B 测试（不同 Agent 实例跑不同策略，对照终端任务指标）。这三条性质是"记忆系统作为可复用基础设施"的前提——如果策略和存储焊死在一起，换策略等于重做系统。</p>
+
+        <p>策略的可回放性与事件溯源形成了一个优雅的对偶：L0 的 Record ledger 记录了所有输入事件（不可变），L2 的策略是纯函数（确定性映射）。给定相同的事件序列和策略，重放结果完全一致——这意味着任何历史决策都可以被精确复现和审计。当策略更新时，可以把历史事件序列喂给新策略，离线评估"如果当时用新策略会怎样"——这是策略的 A/B 测试和离线评估的理论基础。</p>
+      </section>
+
+      <section id="s2-5">
+        <h2>2.5 三层分离的工程意义</h2>
+
+        <p>每层独立替换是三层分离的核心价值。把 L0 从 Postgres+pgvector 换到 SQLite+Faiss，L1/L2 一行不动。把 L1 从人际本体换到任务图本体或知识图谱本体，L0/L2 一行不动。把 L2 从默认启发式换成 RL 训练的控制器，L0/L1 一行不动。</p>
+
+        <p>这种可替换性的理论基础来自 Parnas 的信息隐藏原则 <sup><a href="#ref-13">[13]</a></sup>：每个模块隐藏一个可能变化的设计决策。我们的三层各自隐藏的决策是：</p>
+
+        <table>
+          <thead>
+            <tr>
+              <th>层</th>
+              <th>隐藏的决策</th>
+              <th>替换触发</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>L0</strong></td>
+              <td>存储引擎、索引结构、持久化策略</td>
+              <td>换数据库引擎（Postgres → SQLite）、换向量索引（pgvector → Faiss）</td>
+            </tr>
+            <tr>
+              <td><strong>L1</strong></td>
+              <td>认知类型体系、实体本体、时间模型</td>
+              <td>换业务领域（CRM → 知识库）、换本体设计（主体/客体/关系 → 概念/文档/声明）</td>
+            </tr>
+            <tr>
+              <td><strong>L2</strong></td>
+              <td>价值函数、准入策略、编码深度、遗忘策略</td>
+              <td>换业务目标（客服满意度 → 编程正确率）、换算法（启发式 → RL）</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>对照现有方案：</p>
+
+        <table>
+          <thead>
+            <tr>
+              <th></th>
+              <th>L0 是否存在？</th>
+              <th>L1 是否存在？</th>
+              <th>L2 是否可替换？</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>mem0</strong></td>
+              <td>部分（fact 表 + 索引）</td>
+              <td>无（单一类型）</td>
+              <td>否（策略写死在 LLM prompt）</td>
+            </tr>
+            <tr>
+              <td><strong>MemoryOS</strong></td>
+              <td>部分（按时间分级存储）</td>
+              <td>半（仅时间维度）</td>
+              <td>否（晋升降级硬编码）</td>
+            </tr>
+            <tr>
+              <td><strong>GraphRAG</strong></td>
+              <td>弱（图索引，更新困难）</td>
+              <td>半（实体+关系+社区）</td>
+              <td>否（无策略概念）</td>
+            </tr>
+            <tr>
+              <td><strong>Zep/Graphiti</strong></td>
+              <td>部分（bitemporal KG）</td>
+              <td>半（实体+关系+bitemporal）</td>
+              <td>否（策略内嵌）</td>
+            </tr>
+            <tr>
+              <td><strong>本方案</strong></td>
+              <td>完整（五条不变量）</td>
+              <td>完整（四轴空间）</td>
+              <td>完整（四个接口）</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>这里有一个需要强调的工程洞察：<strong>LSM-Tree 的分层架构</strong> <sup><a href="#ref-15">[15]</a></sup> 与我们的三层分离有结构性同构。LSM 的三层是：WAL + memtable（写路径）→ 多层 SSTable（读路径）→ compaction 策略（可替换的垃圾回收/合并算法）。我们的三层是：Record ledger + facet store（写路径）→ 类型化的索引空间（读路径）→ 策略平面（可替换的记/忘/反思算法）。LSM 之所以成为 KV 存储的标准引擎（RocksDB、LevelDB、Cassandra 都基于它），不是因为它内置了所有业务逻辑，而是因为它的三层分离使得每一层可以独立优化——这正是我们对 Agent 记忆组件追求的同一品质。</p>
+
+        <p>另一个可类比的系统是 <strong>关系代数之于 SQL 数据库</strong> <sup><a href="#ref-14">[14]</a></sup>。Codd 的五个基本算子（选择 σ、投影 π、笛卡尔积 ×、并 ∪、差 −）提供了<strong>闭包性</strong>（输入输出都是关系，可组合）和<strong>声明性</strong>（描述要什么而非怎么做）。我们的 L0 API（appendRecord、writeEvidence、derive、arbitrate、readEvidence）对认知存储做了同样的事——提供最小的、闭包的、可组合的操作集，让上层的类型系统和策略平面可以在不触碰内核的情况下自由构建任意复杂的认知管理逻辑。</p>
+      </section>
+
+      <section id="s2-6">
+        <h2>2.6 一条贯穿全栈的工程边界：压缩必须是"向上派生"而非"向下擦除"</h2>
+
+        <p>到这里需要立一条隐含但关键的工程边界，否则后面的 reflective type 与"压缩即智能"会与上面五条不变量直接冲突。</p>
+
+        <p>很多文献谈记忆压缩时的潜台词是"把多条具体记忆<strong>熔炼为</strong>一条抽象规则"——字面读，这意味着删掉底层 facet 只留高阶规则。这是错的，理由有三：</p>
+
+        <ul>
+          <li><strong>违反 invariant 2（Memory 是派生）</strong>：抽象规则一旦切断与底层证据的引用，它就成了一个"无源信仰"——未来出现反例时无法回到证据集重新派生，整个 living document 死掉。</li>
+          <li><strong>违反 invariant 4（永不拒写）</strong>：以"被规则吸收了"为由不再保留底层 facet，等价于一种隐性 gating，会让低频但关键的反例提前消失。</li>
+          <li><strong>退化为 mem0 式不可逆 DELETE</strong>：抽象一旦错——而抽象总会错——你失去了一切补救手段。</li>
+        </ul>
+
+        <p>正确的工程语义只有一种：</p>
+
+        <blockquote>
+          <p><strong>压缩 = 在已有证据集之上派生一条新的、更高层级的 reflective-type facet；新 facet 的"证据"是它所归纳的底层 facet 的引用；底层 facet 留在 L0 中不动。投影时按预算默认只展开到高层，需要时下钻。</strong></p>
+        </blockquote>
+
+        <p>这条边界让"压缩即智能"在工程上落地为 <strong>reflective facet 的累积</strong>，而不是 <strong>episodic/semantic facet 的删除</strong>。当一个高阶反思被新证据挑战时，可以原路下钻到它的底层证据重新派生——这正是 living document 的本意。</p>
+
+        <p>"注意力瓶颈"和"检索信噪比"这两个真实瓶颈——前者指 LLM 即便上下文窗口扩展到百万 token 量级，注意力本身仍是有损通道；后者指当 facet 数量膨胀，语义近似但无关的噪声会严重稀释检索结果——<strong>都不是靠物理删除解决的</strong>，而是靠后续章节的预算化召回 <code>⊕_budget</code> 在读路径上、按层级择优展开解决的。写路径只增不删，读路径按价值取舍——这条非对称是整个架构得以"既会遗忘又可逆"的关键。</p>
+
+        <p>这个设计与 CLS 理论中的 consolidation 机制再次形成同构映射：海马体的原始痕迹（L0 Record）在 replay 过程中<strong>不被擦除</strong>，而是被"渐进整合"进新皮层的结构中（L1 reflective facet）。即便新皮层形成了高阶 schema，海马体的原始痕迹在一定条件下仍然可以被独立访问——这正是"底层 facet 留在 L0 不动，需要时下钻"的神经科学类比 <sup><a href="#ref-5">[5]</a></sup>。</p>
+      </section>
+
+      <section id="s2-7">
+        <h2>2.7 本章小结</h2>
+
+        <p>三层不是设计出来的，是约束推导出来的。C1 要求证据链不可变 → L0；C1+C2 要求矛盾证据并存且可追溯 → L0 的永不拒写 + 仲裁即证据；C3 要求时间作为一等公民 → L1 的 bitemporal；C4 要求价值驱动取舍 → L2 的策略平面。每一层独立替换的工程意义，是对"通用组件"的真正定义——不是功能堆叠，而是约束清晰，扩展自由。</p>
+
+        <p>本章的理论支撑来自多个独立的系统架构传统：Parnas 的信息隐藏原则指导了"按最可能变化的维度切分模块"；Codd 的关系代数提供了"闭包算子 + 可组合性"的设计范式；LSM-Tree 提供了"分层存储 + 可替换 compaction 策略"的架构模板；事件溯源和 Helland 的不可变性原则提供了"append-only + 派生"的存储哲学；Snodgrass 的 bitemporal 模型提供了"双时间维度"的理论基础；McClelland 的 CLS 理论和 Tulving 的记忆分类学提供了认知科学的约束验证。这些独立的理论传统在 Agent 记忆这个场景下收敛到同一个架构——这不是巧合，而是因为它们都在解决同一个根本问题：<strong>如何在持续变化的输入流中维护可追溯、可修订、可组合的结构化知识</strong>。</p>
+
+        <p>但三层分离只回答了"如何存与派生"的问题，还没有回答"在有限的存储与注意力下，到底该记什么、该忘什么"——这是第3章的任务。</p>
+      </section>
+
+      <section class="references" id="references">
+        <details>
+          <summary><h2>参考文献</h2></summary>
+          <ol class="references__list">
+          <li data-ref="[1]" id="ref-1">Tulving (2002) — Episodic memory: From mind to brain. <a href="https://pubmed.ncbi.nlm.nih.gov/11752477/">PubMed</a></li>
+          <li data-ref="[2]" id="ref-2">Baddeley, A.D. &amp; Hitch, G. (1974). Working memory. <em>Psychology of Learning and Motivation</em>, 8, 47–89. <a href="https://doi.org/10.1016/S0079-7421(08)60452-1">DOI</a></li>
+          <li data-ref="[3]" id="ref-3">Miller, G.A. (1956). The magical number seven, plus or minus two. <em>Psychological Review</em>, 63(2), 81–97. <a href="https://psychclassics.yorku.ca/Miller/">Link</a></li>
+          <li data-ref="[4]" id="ref-4">Cowan, N. (2001). The magical number 4 in short-term memory. <em>Behavioral and Brain Sciences</em>, 24(1), 87–114. <a href="https://doi.org/10.1017/S0140525X01000020">DOI</a></li>
+          <li data-ref="[5]" id="ref-5">McClelland, J.L., McNaughton, B.L. &amp; O'Reilly, R.C. (1995). Why there are complementary learning systems in the hippocampus and neocortex. <em>Psychological Review</em>, 102(3), 419–457. <a href="https://doi.org/10.1037/0033-295X.102.3.419">DOI</a></li>
+          <li data-ref="[6]" id="ref-6">Bartlett, F.C. (1932). <em>Remembering: A Study in Experimental and Social Psychology</em>. Cambridge University Press. <a href="https://en.wikipedia.org/wiki/Remembering_(book)">Wikipedia</a></li>
+          <li data-ref="[7]" id="ref-7">van Kesteren, M.T.R. et al. (2012). How schema and novelty augment memory formation. <em>Trends in Neurosciences</em>, 35(5), 211–219. <a href="https://doi.org/10.1016/j.tins.2012.01.007">DOI</a></li>
+          <li data-ref="[8]" id="ref-8">Johnson, M.K. &amp; Raye, C.L. (1981). Reality monitoring. <em>Psychological Review</em>, 88, 67–85. <a href="https://doi.org/10.1037/0033-295X.88.1.67">DOI</a></li>
+          <li data-ref="[9]" id="ref-9">Ebbinghaus, H. (1885). <em>Über das Gedächtnis</em>. Duncker &amp; Humblot. <a href="https://psychclassics.yorku.ca/Ebbinghaus/index.htm">Link</a></li>
+          <li data-ref="[10]" id="ref-10">Nader, K., Schafe, G.E. &amp; LeDoux, J.E. (2000). Fear memories require protein synthesis in the amygdala for reconsolidation after retrieval. <em>Nature</em>, 406, 722–726. <a href="https://doi.org/10.1038/35015072">DOI</a></li>
+          <li data-ref="[11]" id="ref-11">Snodgrass, R.T. (1999). <em>Developing Time-Oriented Database Applications in SQL</em>. Morgan Kaufmann. <a href="https://www2.cs.arizona.edu/~rts/tdbbook.pdf">PDF</a></li>
+          <li data-ref="[12]" id="ref-12">Fowler, M. Event Sourcing. <a href="https://martinfowler.com/eaaDev/EventSourcing.html">Link</a></li>
+          <li data-ref="[13]" id="ref-13">Parnas, D.L. (1972). On the criteria to be used in decomposing systems into modules. <em>Communications of the ACM</em>, 15(12), 1053–1058. <a href="https://doi.org/10.1145/361598.361623">DOI</a></li>
+          <li data-ref="[14]" id="ref-14">Codd, E.F. (1970). A relational model of data for large shared data banks. <em>Communications of the ACM</em>, 13(6), 377–387. <a href="https://doi.org/10.1145/362384.362685">DOI</a></li>
+          <li data-ref="[15]" id="ref-15">O'Neil, P. et al. (1996). The log-structured merge-tree. <em>Acta Informatica</em>, 33(4), 351–385. <a href="https://doi.org/10.1007/s007780050006">DOI</a></li>
+          <li data-ref="[16]" id="ref-16">Helland, P. (2015). Immutability changes everything. <em>CIDR '15</em>. <a href="https://www.cidrdb.org/cidr2015/Papers/CIDR15_Paper16.pdf">PDF</a></li>
+          <li data-ref="[17]" id="ref-17">Gupta, A. &amp; Mumick, I.S. (1999). <em>Materialized Views: Techniques, Implementations, and Applications</em>. MIT Press. <a href="https://doi.org/10.1007/BFb0000379">DOI</a></li>
+          <li data-ref="[18]" id="ref-18">Mem0. <a href="https://mem0.ai">mem0.ai</a></li>
+          <li data-ref="[19]" id="ref-19">Letta (MemGPT). <a href="https://www.letta.com">letta.com</a>. Skill Learning, Context Constitution, Context Repositories, Agent File (.af).</li>
+          <li data-ref="[20]" id="ref-20">Zep/Graphiti. arXiv:2501.13956, 2025. <a href="https://arxiv.org/abs/2501.13956">arXiv</a></li>
+          </ol>
+        </details>
+      </section>
+
+      <nav class="article-pager">
+        <a href="chapter-1.html" class="article-pager__link">
+          <span class="article-pager__label">上一章</span>
+          <span class="article-pager__title">记忆不是存储</span>
+        </a>
+        <a href="chapter-3.html" class="article-pager__link article-pager__link--next">
+          <span class="article-pager__label">下一章</span>
+          <span class="article-pager__title">统一价值函数</span>
+        </a>
+      </nav>
+
+    </main>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>

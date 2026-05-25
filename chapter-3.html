@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>统一价值函数——记与忘的同一把尺 — Agent 记忆系统</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="progress-bar"></div>
+  <nav class="article-nav">
+    <a href="index.html" class="article-nav__back">返回系列</a>
+    <span class="article-nav__title">统一价值函数</span>
+    <button class="nav-toggle" aria-label="菜单" aria-expanded="false">
+      <span class="nav-toggle__bar"></span>
+      <span class="nav-toggle__bar"></span>
+      <span class="nav-toggle__bar"></span>
+    </button>
+  </nav>
+
+  <header class="article-hero">
+    <div class="container">
+      <span class="article-hero__chapter animate-in">第3章</span>
+      <h1 class="article-hero__title animate-in animate-delay-1">统一价值函数——记与忘的同一把尺</h1>
+      <p class="article-hero__meta animate-in animate-delay-2">程乾 · 2026-05-24 · 约 10 分钟</p>
+    </div>
+  </header>
+
+  <div class="article-layout">
+    <aside class="article-layout__sidebar">
+      <nav class="toc">
+        <div class="toc__title">目录</div>
+        <ul class="toc__list">
+          <li><a href="#s3-1">3.1 问题形式化：记忆管理的本质是受限资源下的序贯决策</a></li>
+          <li class="toc__sub"><a href="#s3-1-1">3.1.1 有界最优性：在约束下做到最好</a></li>
+          <li><a href="#s3-2">3.2 "记什么"：基于增量价值的准入控制</a></li>
+          <li class="toc__sub"><a href="#s3-2-1">3.2.1 预测编码视角下的准入判断</a></li>
+          <li class="toc__sub"><a href="#s3-2-2">3.2.2 信用分配：一条记忆的未来价值如何归属</a></li>
+          <li><a href="#s3-3">3.3 "怎么记"：编码深度的决策</a></li>
+          <li><a href="#s3-4">3.4 "什么时候记"：事件驱动的价值触发机制</a></li>
+          <li><a href="#s3-5">3.5 "什么时候挤"：基于统一价值排序的遗忘</a></li>
+          <li><a href="#s3-6">3.6 协同流水线：价值驱动记忆系统的完整运行时</a></li>
+          <li class="toc__sub"><a href="#s3-6-1">3.6.1 多时间尺度的协同</a></li>
+          <li><a href="#s3-7">3.7 本章小结</a></li>
+        </ul>
+      </nav>
+    </aside>
+    <main class="article-layout__content">
+      <article class="article-content">
+
+        <section id="s3-1">
+          <h3>3.1 问题形式化：记忆管理的本质是受限资源下的序贯决策</h3>
+
+          <p>Agent 的存储是有限的，LLM 的上下文窗口是有限的，每次记忆操作（写入、检索、归纳）的计算预算是有限的。三个有限叠加，意味着记忆管理不是一个"存数据"的问题，而是一个<strong>序贯决策问题</strong>（sequential decision problem）：在每一个时间点，面对新到达的信息流，系统必须决定是否写入、以何种形式写入、以及淘汰哪些旧信息——所有这些决策的累积效果，决定了 Agent 在未来任务中的表现。</p>
+
+          <p>这个决策问题可以用 Markov Decision Process（MDP）的形式化语言精确描述。Sutton &amp; Barto 在其经典教材 <em>Reinforcement Learning: An Introduction</em> 中给出了 MDP 的标准五元组定义：状态空间 <span class="math">$\mathcal{S}$</span>、动作空间 <span class="math">$\mathcal{A}$</span>、转移函数 <span class="math">$\mathcal{P}$</span>、回报函数 <span class="math">$\mathcal{R}$</span>、折扣因子 <span class="math">$\gamma$</span> <sup><a href="#ref-31">[31]</a></sup>。映射到记忆管理场景：</p>
+
+          <table>
+            <thead>
+              <tr>
+                <th>MDP 要素</th>
+                <th>记忆管理对应</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>状态 <span class="math">$s_t$</span></strong></td>
+                <td>当前记忆库 <span class="math">$\mathcal{M}_t$</span> 的完整快照（所有 facet 的内容、置信度、证据链）</td>
+              </tr>
+              <tr>
+                <td><strong>动作 <span class="math">$a_t$</span></strong></td>
+                <td>四类策略决策：是否写入（record）、如何编码（encode）、是否淘汰（forget）、是否反思（reflect）</td>
+              </tr>
+              <tr>
+                <td><strong>转移 <span class="math">$\mathcal{P}(s_{t+1} \mid s_t, a_t)$</span></strong></td>
+                <td>写入/淘汰/反思后记忆库的新状态——由 L0 的五条不变量保证确定性</td>
+              </tr>
+              <tr>
+                <td><strong>回报 <span class="math">$R(a_t, s_t)$</span></strong></td>
+                <td>Agent 在任务上的终端表现变化——这是 <span class="math">$R_{\text{task}}$</span> 的增量</td>
+              </tr>
+              <tr>
+                <td><strong>折扣 <span class="math">$\gamma$</span></strong></td>
+                <td>未来回报的衰减——越远期的预测越不确定，权重越低</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <p>形式化目标函数为：</p>
+
+          <div class="math-block">$$\max_{\pi} \mathbb{E}\left[\sum_{t=0}^{\infty} \gamma^t R(a_t, s_t) \;\middle|\; \mathcal{M}_0 \right] \quad \text{s.t.} \quad |\mathcal{M}_t| \leq C,\ \sum_t \text{cost}(a_t) \leq B$$</div>
+
+          <p>用自然语言说：<strong>在固定的存储容量 <span class="math">$C$</span> 和总计算成本预算 <span class="math">$B$</span> 下，让智能体未来做出的决策获得最高的折扣累积任务回报。</strong> 一条记忆该不该留，只看它对完成终极目标的<strong>边际价值</strong>（marginal value）是否大于它占用的资源成本。</p>
+
+          <p>这里的"保留价值"概念，其理论根基可以追溯到信息论。Shannon 在 1948 年的奠基论文中定义了信息熵 <span class="math">$H(X) = -\sum_x p(x) \log_2 p(x)$</span>，它度量的是一个随机变量的"惊奇程度"——越不可预测的事件包含越多的信息量 <sup><a href="#ref-24">[24]</a></sup>。一条记忆的价值，粗略地说，可以用它对未来决策的<strong>条件熵减少量</strong>来度量：给定这条记忆 <span class="math">$m$</span>，Agent 对未来最优动作的不确定性减少了多少？这就是互信息（Mutual Information）<span class="math">$I(\text{Action}; m \mid \text{context})$</span> 的含义。如果一条记忆对 Agent 的未来行为没有任何影响——无论有没有它，Agent 都会做出同样的决策——那它的互信息为零，保留价值为零。</p>
+
+          <p>但互信息只度量了"相关性"，没有度量"功利性"。一只猫闯进会议室，对于"会议内容"这个随机变量具有极高的互信息（它确实减少了对"会议发生了什么"的不确定性），但对于一个跟踪项目进度的 Agent 来说，这段记忆的任务回报贡献为零。因此，价值函数必须是<strong>条件于任务回报的互信息</strong>——不是 <span class="math">$I(X; m)$</span>，而是 <span class="math">$I(R_{\text{task}}; m \mid \text{context})$</span>。这个区分将在第 4 章展开讨论。</p>
+
+          <p>在 MDP 框架下，记忆管理策略 <span class="math">$\pi$</span> 就是一个从状态到动作的映射：给定当前记忆库的快照，决定做什么。最优策略 <span class="math">$\pi^*$</span> 是使累积回报最大化的那个策略。然而，直接求解这个 MDP 是不可能的——状态空间是所有可能 facet 组合的幂集，维度爆炸。因此，我们不追求全局最优，而是将问题分解为四个可独立近似的子决策：<strong>记什么（admission control）、怎么记（encoding depth）、什么时候记（event-driven trigger）、什么时候挤（value-sorted forgetting）</strong>。每个子决策共享同一个价值标尺，但在不同时间尺度上运作。</p>
+
+          <section id="s3-1-1">
+            <h4>3.1.1 有界最优性：在约束下做到最好</h4>
+
+            <p>这里需要引入一个重要概念区分。Herbert Simon 在 1956 年提出了"有限理性"（bounded rationality）：真实世界的决策者不具备无限的计算资源来找到全局最优解，而是采用"满意即止"（satisficing）策略 <sup><a href="#ref-25">[25]</a></sup>。Stuart Russell 在 1995 年进一步形式化了"有界最优性"（bounded optimality）：给定计算资源约束，最优的不是那个做出最优决策的程序，而是在约束内用最有效方式逼近最优的程序 <sup><a href="#ref-26">[26]</a></sup>。</p>
+
+            <p>映射到记忆管理：我们不期望系统在每条信息到达时都精确计算其边际价值（这本身就需要解决整个 MDP），而是设计一个<strong>在给定计算预算内最大化长期回报的近似策略</strong>。3.2-3.5 节的四个子决策就是这个近似策略的具体设计——每一个都用启发式而非精确求解来平衡计算成本与决策质量。</p>
+          </section>
+        </section>
+
+        <section id="s3-2">
+          <h3>3.2 "记什么"：基于增量价值的准入控制</h3>
+
+          <p>智能体时刻都在产生观察和思考，不可能全部写入长期记忆。"记什么"就是在问：<strong>这条新信息值得进入长期记忆吗？</strong></p>
+
+          <p>答案的理论基础来自 Kolmogorov 复杂度与最小描述长度（Minimum Description Length, MDL）原则。Rissanen 在 1978 年提出的 MDL 原则指出：给定数据集 <span class="math">$D$</span>，最好的模型（假说）<span class="math">$H$</span> 是使 <span class="math">$L(H) + L(D \mid H)$</span> 最小化的那个——即模型自身的描述长度加上数据在模型下的编码长度之和最小 <sup><a href="#ref-27">[27]</a></sup>。直觉上，一个好的模型应该既简洁又能很好地解释数据。映射到记忆系统：一条新记忆 <span class="math">$m$</span> 值得写入，当且仅当它的加入能减少记忆库对未来观察的总编码长度——即 <span class="math">$m$</span> 提供了"压缩增益"。</p>
+
+          <p>具体地，设当前记忆库为 <span class="math">$\mathcal{M}$</span>，新观察为 <span class="math">$o$</span>。定义写入 <span class="math">$m$</span> 的边际价值为：</p>
+
+          <div class="math-block">$$\Delta(m, \mathcal{M}) = \underbrace{L(o \mid \mathcal{M})}_{\text{不加 }m\text{ 时的编码长度}} - \underbrace{L(o \mid \mathcal{M} \cup \{m\})}_{\text{加了 }m\text{ 后的编码长度}} - \underbrace{L(m)}_{\text{记忆自身的存储成本}}$$</div>
+
+          <p>只有当 <span class="math">$\Delta(m, \mathcal{M}) > 0$</span> 时，写入才是值得的。这个标准同时考虑了三个因素：</p>
+
+          <ul>
+            <li><strong>新颖性与冗余比</strong>：如果 <span class="math">$m$</span> 与 <span class="math">$\mathcal{M}$</span> 中已有记忆高度冗余，则 <span class="math">$L(o \mid \mathcal{M}) \approx L(o \mid \mathcal{M} \cup \{m\})$</span>，边际价值趋零。工程上可以用新信息与已有记忆库的语义相似度来近似——重复度越高，增量信息越低。</li>
+            <li><strong>任务相关性</strong>：与当前目标、活跃计划或高频检索模式高度相关的信息，未来调用概率极高。这是 <span class="math">$R_{\text{task}}$</span> 驱动的最直接体现：一条信息的价值最终取决于它是否帮助 Agent 在任务中做出更好的决策。</li>
+            <li><strong>重要度启发</strong>：来自发言者的强调（"这一点很关键"）、结构位置（开场白、总结陈词）、情绪标记等，都会赋予信息更高的先验重要性。这些是通用信号，在没有足够任务反馈时提供冷启动的入场分。</li>
+          </ul>
+
+          <p>Schmidhuber 在 2009 年提出的"压缩进步"（compression progress）理论进一步阐明了这一点：好奇心（curiosity）的本质是<strong>最大化压缩进步的速率</strong>——智能体倾向于关注那些能让自己找到新规律、从而提升压缩能力的观察 <sup><a href="#ref-28">[28]</a></sup>。一条记忆的价值不仅在于它对当前任务的直接贡献，还在于它开启了对未来更高效压缩的可能性——即它是一个"可被进一步压缩的原材料"。</p>
+
+          <p>准入机制不是设一个固定门槛，而是<strong>只有当新信息的保留价值大于当前记忆库中最低价值条目的分数时，才触发写入</strong>。这个条件同时解决了"记什么"和"挤什么"——当新信息价值足够高时，它自动触发对最低价值旧条目的淘汰。记与挤的决策用同一把尺，避免了准入标准与淘汰标准不一致导致的系统振荡。</p>
+
+          <p>从强化学习的角度，这个准入控制对应的是一个<strong>exploration-exploitation 权衡</strong>。Auer 等人在 2002 年提出的 UCB（Upper Confidence Bound）算法给出了一个优雅的解决方案：选择具有最高置信上界的动作 <sup><a href="#ref-32">[32]</a></sup>。映射到记忆准入：对每条候选记忆，维护一个价值估计和一个不确定性范围。当记忆的价值估计高度不确定时（新类型的信息、从未被检索验证过），给予更高的探索奖励——倾向于先写入，留待未来验证。随着该类型信息被反复检索或忽略，不确定性下降，价值估计收敛，准入决策变得更加确定。这避免了"只记已知重要的东西"的陷阱——系统需要偶尔写入一些"不确定是否重要"的信息，才能发现新的重要模式。</p>
+
+          <section id="s3-2-1">
+            <h4>3.2.1 预测编码视角下的准入判断</h4>
+
+            <p>预测编码（predictive coding）理论为准入控制提供了另一个视角。Rao &amp; Ballard 在 1999 年的开创性论文中提出：大脑不是一个被动的记录装置，而是一个主动的预测机器 <sup><a href="#ref-33">[33]</a></sup>。大脑持续生成对下一刻感官输入的预测，只有<strong>预测误差</strong>（prediction error）——实际输入与预测之间的差异——才会被向上传播到更高层的处理区域。预测准确的部分被静默"压缩"，只有意外部分消耗认知资源。</p>
+
+            <p>映射到记忆准入：Agent 维护一个基于当前记忆的"世界模型"，对每条新到达的信息生成预测。如果信息与预测高度一致（低预测误差），说明这条信息已被现有记忆充分编码，其边际价值低。如果信息出乎意料（高预测误差），说明现有记忆不足以解释世界，这条信息值得写入——因为它代表了世界模型需要更新的地方。</p>
+
+            <p>Karl Friston 的自由能原理（Free Energy Principle, 2010）将这一思想推向更一般的理论框架 <sup><a href="#ref-34">[34]</a></sup>。自由能 <span class="math">$\mathcal{F}$</span> 是一个上界，度量了 Agent 内部模型与真实世界分布之间的 KL 散度 <span class="math">$D_{\text{KL}}[q(\theta) \| p(\theta \mid o)]$</span>。最小化自由能等价于同时做两件事：（1）更新内部模型使其更好地匹配观察（perceptual inference，即"记"）；（2）主动选择行动来减少未来观察的不确定性（active inference，即"选择性记"）。记忆准入控制在自由能框架下，就是：只写入那些能有效降低自由能的观察——即那些能帮助内部模型更好地预测世界的信号。</p>
+          </section>
+
+          <section id="s3-2-2">
+            <h4>3.2.2 信用分配：一条记忆的未来价值如何归属</h4>
+
+            <p>Sutton 在 1988 年提出的信用分配（credit assignment）问题指出：在时间序列决策中，一个动作的回报往往延迟到来，如何将最终回报正确地归因到沿途的每个动作，是一个根本性难题 <sup><a href="#ref-35">[35]</a></sup>。TD（Temporal Difference）学习和 eligibility traces 提供了解决方案：每个状态-动作对维护一个"资格迹"，记录它在最近决策中的参与程度，回报到达时按资格迹分配。</p>
+
+            <p>映射到记忆系统：当一条记忆在三个月后的一次关键决策中被召回并发挥作用时，这个"功劳"不应该只归于这条记忆本身，而应该沿着它的引用链回传——它所依据的原始观察、它所属的 reflective facet、以及当初决定写入它的 record_policy 都分享了这份功劳。这种回传机制让策略的训练信号不是"这条记忆用了几次"这么粗糙，而是"这条记忆在什么情境下、通过什么路径、对什么任务产生了多少增量回报"——一个精确的信用分配图。</p>
+          </section>
+        </section>
+
+        <section id="s3-3">
+          <h3>3.3 "怎么记"：编码深度的决策</h3>
+
+          <p>同样一条信息"Hans 要求把付款周期从 45 天改为 30 天"，系统可以选择不同深度的编码：</p>
+
+          <ul>
+            <li><strong>浅层记录（原文/embedding）</strong>：完整保存原始表述。保真度最高，但存储成本高，未来检索时也需要更多 token 来消费。</li>
+            <li><strong>结构化摘要</strong>：压缩为 "{主体: Hans, 属性: 付款周期, 旧值: 45天, 新值: 30天, 状态: 待确认}"。大幅降低存储成本，保留核心语义，但丢失了原文措辞的精确性。</li>
+            <li><strong>反思/归因</strong>：如果系统识别出这是 Hans 过去半年内第三次调整付款条款，它可以向上派生一条 reflective facet："Hans 有在交货前重新谈判付款条款的模式，可能与他的现金流周期有关。"这是价值密度最高的形式——它提供了跨实例的模式识别，能在未来相似场景中直接替代多次原始查询。</li>
+          </ul>
+
+          <p>选择哪种深度，其理论基础是 Shannon 的<strong>率失真理论</strong>（Rate-Distortion Theory, 1959）<sup><a href="#ref-29">[29]</a></sup>。率失真理论回答的核心问题是：<strong>给定一个可容忍的失真（distortion）上限 <span class="math">$D$</span>，信源编码所需的最小比特率 <span class="math">$R(D)$</span> 是多少？</strong> 或者反过来：<strong>给定一个比特率预算 <span class="math">$R$</span>，能达到的最小失真是多少？</strong></p>
+
+          <p>在记忆编码场景中：</p>
+
+          <table>
+            <thead>
+              <tr>
+                <th>率失真概念</th>
+                <th>记忆编码对应</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>信源（Source）</td>
+                <td>原始观察/交互流</td>
+              </tr>
+              <tr>
+                <td>编码（Encoding）</td>
+                <td>选择的记录形式（原文、摘要、反思）</td>
+              </tr>
+              <tr>
+                <td>比特率 <span class="math">$R$</span></td>
+                <td>每条记忆占用的 token/存储量</td>
+              </tr>
+              <tr>
+                <td>失真 <span class="math">$D$</span></td>
+                <td>编码后信息对原始观察的"损失"——在未来任务中导致次优决策的概率</td>
+              </tr>
+              <tr>
+                <td>率失真函数 <span class="math">$R(D)$</span></td>
+                <td>达到失真水平 <span class="math">$D$</span> 所需的最小编码量</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <p>率失真理论告诉我们：存在一个理论下界 <span class="math">$R(D)$</span>，任何编码方案都无法在低于这个比特率的同时保持失真低于 <span class="math">$D$</span>。浅层记录的 <span class="math">$R$</span> 高但 <span class="math">$D$</span> 低；深层压缩的 <span class="math">$R$</span> 低但 <span class="math">$D$</span> 高。最优编码深度选择就是在这个 tradeoff 曲线上找到与当前存储预算和任务容忍度对应的切点。</p>
+
+          <p>Tishby 等人在 1999 年提出的<strong>信息瓶颈</strong>（Information Bottleneck）方法进一步将这个框架推广到"保留与任务相关的信息、丢弃无关信息"的场景 <sup><a href="#ref-30">[30]</a></sup>。信息瓶颈的目标是找到一个压缩表示 <span class="math">$T$</span>（对应我们的"编码后记忆"），使得：</p>
+
+          <div class="math-block">$$\min_{p(t \mid x)} \left[ I(X; T) - \beta \cdot I(T; Y) \right]$$</div>
+
+          <p>其中 <span class="math">$X$</span> 是原始输入（观察），<span class="math">$Y$</span> 是目标变量（任务回报），<span class="math">$T$</span> 是压缩表示（记忆编码），<span class="math">$\beta$</span> 是权衡参数。直觉上：最小化表示的复杂度 <span class="math">$I(X; T)$</span>（存储成本），同时最大化表示对任务的信息量 <span class="math">$I(T; Y)$</span>（任务价值）。<span class="math">$\beta$</span> 越大，系统越倾向于保留任务相关信息而丢弃其他；<span class="math">$\beta$</span> 越小，系统越倾向于保留更多原始信息。</p>
+
+          <p>这个框架精确地形式化了"怎么记"的决策：<strong>编码深度由信息瓶颈的 <span class="math">$\beta$</span> 参数控制，而 <span class="math">$\beta$</span> 本身由外部任务目标 <span class="math">$R_{\text{task}}$</span> 驱动。</strong> 客服场景下 <span class="math">$\beta$</span> 较大（只保留与问题解决相关的信息，其余可压缩），科研场景下 <span class="math">$\beta$</span> 较小（意外发现可能有长远价值，保留更多原始细节）。</p>
+
+          <p>这里有一个重要的工程分工：<strong>提取深度与反思深度是两件不同的事。</strong> 单次 LLM 调用（Extract 阶段）适合做模式识别和分类——把"付款周期 30 天"从邮件原文中抽取出来，标注为 semantic facet。但多步归因——"这是第三次调整，可能存在谈判模式"——不应该在 Extract 阶段做，应该在 Reflect 阶段做。把浅层提取和深层反思分开，既控制了单次调用的成本和延迟，也让"压缩即智能"有了明确的工程节奏：日常增量运行浅层提取，夜间或触发条件满足时运行深层反思。这两阶段各有不同的深度边界，分工清晰。</p>
+        </section>
+
+        <section id="s3-4">
+          <h3>3.4 "什么时候记"：事件驱动的价值触发机制</h3>
+
+          <p>在超长会议或持续对话中，Agent 不应该匀速记笔记——它应该在<strong>关键瞬间突然提笔</strong>。记录动作的触发是一个门控函数：当前信息的预估价值超过动态阈值时，打开写入窗口。</p>
+
+          <p>触发信号的理论基础同样可以从预测编码中找到。Rao &amp; Ballard 的模型表明，神经元只在预测误差超过某个阈值时才发放脉冲——这在神经科学中被称为"surprise-gated encoding" <sup><a href="#ref-33">[33]</a></sup>。映射到 Agent 记忆：</p>
+
+          <p>触发信号通常包括：</p>
+
+          <ul>
+            <li><strong>惊奇/预测误差（surprise）</strong>：当实际内容与基于现有记忆的预测严重不符时，说明出现了高信息量事件。信息论中，surprise 可以用 <span class="math">$-\log p(o \mid \mathcal{M})$</span> 来量化——概率越低的事件，信息量越大。比如老师突然推翻前面结论，或客户说出完全出乎意料的诉求。</li>
+            <li><strong>目标/意图相关性</strong>：如果 Agent 带着明确的任务目标（如"会后写技术方案"），那么任何与任务语义相关的信息会立刻拉高价值分，触发记录，哪怕它表面平淡。</li>
+            <li><strong>结构性转折点</strong>：话题切换、总结陈词、明确列举"三个重点"等，是天然的记录时机。这些信号可以用 discourse structure analysis 来自动检测。</li>
+            <li><strong>工作记忆缓冲区满</strong>：类似人类听完一个子话题后集中整理，Agent 在语义段落结束或内部缓冲区饱和时，触发一次批量记录与抽象。这借鉴了认知心理学中 Baddeley 的工作记忆模型——语音环路（phonological loop）的容量有限，当满时触发向长期记忆的转写 <sup><a href="#ref-36">[36]</a></sup>。</li>
+          </ul>
+
+          <p>动态阈值随认知负荷和已记信息密度调节——当前正在高强度推理时，阈值升高，只记最关键的信息；当前处于低负荷观察状态时，阈值降低，更密集地记录。这避免了"要么全记要么不记"的粗暴二元选择。</p>
+
+          <p>从强化学习的角度，这个触发机制本质上是一个<strong>bandit 问题</strong>：在每个时间步，系统选择"记"或"不记"，"记"的动作有即时成本（计算、存储），"不记"有潜在的延迟成本（未来任务中缺失这条信息的风险）。UCB 算法的启示是：对于不确定性高的信号（首次出现的信息类型、从未验证过的模式），倾向于"记"——这对应了"宁可多记不可漏记"的保守策略。随着经验积累，触发阈值收敛到更加精确的水平。</p>
+        </section>
+
+        <section id="s3-5">
+          <h3>3.5 "什么时候挤"：基于统一价值排序的遗忘</h3>
+
+          <p>"挤"就是记忆淘汰。在容量超限或注意力预算紧张时，必须舍弃一部分。目标函数要求：<strong>永远淘汰当前记忆库中"保留价值"最低的条目。</strong></p>
+
+          <p>保留价值可以用多因素加权来近似：</p>
+
+          <div class="math-block">$$\text{Score}(m) = w_1 \cdot \text{Recency} + w_2 \cdot \text{Importance} + w_3 \cdot \text{Relevance} - w_4 \cdot \text{Redundancy}$$</div>
+
+          <ul>
+            <li><strong>Recency（新近性）</strong>：刚访问过的更可能再被访问，但权重不宜过高，否则系统会陷入"只记最近的事"的短视。这个启发来自认知心理学中的"近因效应"（recency effect）——但长期记忆系统需要对抗这种偏差。</li>
+            <li><strong>Importance（重要性）</strong>：写入时赋予的长期先验重要度。</li>
+            <li><strong>Relevance（与当前情境的相关度）</strong>：当前任务激活的记忆，其未来效用会骤升。</li>
+            <li><strong>冗余度惩罚</strong>：与强记忆高度重叠的弱记忆，其独立价值打折。</li>
+          </ul>
+
+          <p>从信息论角度，遗忘的目标可以重新表述为：<strong>在存储预算 <span class="math">$C$</span> 的约束下，选择保留哪个子集 <span class="math">$\mathcal{M}' \subseteq \mathcal{M}$</span>，使得 <span class="math">$I(R_{\text{task}}; \mathcal{M}' \mid \text{context})$</span> 最大化</strong>——即保留的那个子集对任务回报的信息量最大。这是一个组合优化问题，在一般情况下是 NP-hard 的（子集选择问题），但贪心算法——每次淘汰对任务回报互信息贡献最小的那条记忆——在次模性（submodularity）条件下有 <span class="math">$(1 - 1/e)$</span> 的近似保证 <sup><a href="#ref-37">[37]</a></sup>。</p>
+
+          <p>Rate-distortion 理论再次提供了理论支撑 <sup><a href="#ref-29">[29]</a></sup>。遗忘本质上是一种有损压缩：将记忆库从 <span class="math">$\mathcal{M}$</span> 压缩到 <span class="math">$\mathcal{M}'$</span>（<span class="math">$|\mathcal{M}'| < |\mathcal{M}|$</span>），在有限的信息损失（distortion）下最大化压缩比。最优遗忘策略就是在率失真曲线上找到与当前存储压力对应的切点——存储越紧张，切点越靠左（压缩率越高，容忍的信息损失越大）。</p>
+
+          <p>触发时机是事件驱动的：当记忆库超过容量阈值，或有新信息准入且其价值高于库中最低分时，立即淘汰最低分条目。此外，遗忘也可以是衰减型的——每次未被检索，分数自然衰减，到零即自动退出投影层。这实现了对长期无用信息的静默清理，不需要显式的"挤"操作。</p>
+
+          <p><strong>记什么和挤什么必须用同一把尺——这是一条收敛性要求。</strong> 如果准入标准高于淘汰标准，系统迟早爆仓（进得多出得少）。如果准入标准低于淘汰标准，系统反复写删振荡（刚写入的高分条目立刻挤掉低分旧条目，但淘汰后旧条目的价值相对上升，下次又被写入）。同一把尺保证了稳定收敛：系统在任意时刻保留下来的，永远是价值最高的那个子集。</p>
+
+          <p>这个收敛性要求可以用不动点定理来理解。设 <span class="math">$\mathcal{M}^*$</span> 是在给定准入阈值 <span class="math">$\theta_{\text{in}}$</span> 和淘汰阈值 <span class="math">$\theta_{\text{out}}$</span> 下系统的稳态记忆集合。当 <span class="math">$\theta_{\text{in}} = \theta_{\text{out}} = \theta^*$</span> 时，系统达到不动点：写入和淘汰在同一个价值水平上平衡，记忆集合的大小和组成稳定。这与 Markov 链的稳态分布有形式上的相似性——记忆集合的组成随时间演化，最终收敛到一个由 <span class="math">$\theta^*$</span> 决定的稳态分布。</p>
+        </section>
+
+        <section id="s3-6">
+          <h3>3.6 协同流水线：价值驱动记忆系统的完整运行时</h3>
+
+          <p>将以上四个决策整合为一条闭环流水线：</p>
+
+          <ol>
+            <li><strong>实时估价</strong>：对每个新语块计算惊喜度（<span class="math">$-\log p(o \mid \mathcal{M})$</span>）、任务相关性（<span class="math">$I(R_{\text{task}}; o \mid \text{context})$</span> 的近似）、与已有记忆的冗余度（<span class="math">$1 - \max_{m \in \mathcal{M}} \text{sim}(o, m)$</span>），形成"记录紧迫性"分数。</li>
+            <li><strong>时机决策</strong>：分数突破动态阈值时，打开写入窗口。</li>
+            <li><strong>内容与形式联合选择</strong>：在窗口内摘取增量价值最高的子片段，立刻决定编码深度——首次出现的关键事实以结构化摘要写入；与刚记过的某条记忆高度关联则触发归并与更新；极其重要的顿悟生成高阶反思 facet。</li>
+            <li><strong>检索反馈自适应</strong>：在后续任务中，被频繁命中的记忆，其所属的记录模式、触发阈值和内容过滤器都会得到正强化。这让未来的"什么时候记、记什么、怎么记"更贴合 Agent 的个性化任务需求。这也解释了为什么在同一堂课上每个人的笔记本都不同——各自的目标函数在持续塑造这条流水线。</li>
+          </ol>
+
+          <p>Ng 等人在 1999 年的<strong>reward shaping</strong>理论提供了反馈自适应的理论保证 <sup><a href="#ref-38">[38]</a></sup>。他们证明：如果中间奖励（shaping reward）是基于势函数（potential function）<span class="math">$\Phi$</span> 的形式 <span class="math">$F(s, s') = \gamma \Phi(s') - \Phi(s)$</span>，那么 shaping 不会改变最优策略——它只是加速了学习。映射到记忆系统：检索频率、用户反馈等中间信号可以作为 reward shaping 加速策略学习，但它们的权重必须满足势函数条件，否则会引入偏差。这在工程上意味着：短期反馈信号应该以"增量"而非"绝对值"的形式参与价值更新——不是"这条记忆被检索了 5 次所以价值是 5"，而是"这次检索使它的价值从 <span class="math">$v$</span> 增加到 <span class="math">$v + \delta$</span>"。</p>
+
+          <section id="s3-6-1">
+            <h4>3.6.1 多时间尺度的协同</h4>
+
+            <p>四个子决策在不同时间尺度上运作，但共享同一个价值标尺，这形成了一个多时间尺度的自适应系统：</p>
+
+            <table>
+              <thead>
+                <tr>
+                  <th>决策</th>
+                  <th>时间尺度</th>
+                  <th>触发信号</th>
+                  <th>理论对应</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Admission（记什么）</td>
+                  <td>实时（每条信息到达）</td>
+                  <td>边际价值 &gt; 淘汰阈值</td>
+                  <td>MDL / 信息瓶颈</td>
+                </tr>
+                <tr>
+                  <td>Encoding（怎么记）</td>
+                  <td>实时（写入时一次性决策）</td>
+                  <td>率失真切点</td>
+                  <td>Rate-distortion / 信息瓶颈</td>
+                </tr>
+                <tr>
+                  <td>Trigger（什么时候记）</td>
+                  <td>亚秒级（门控决策）</td>
+                  <td>预测误差 &gt; 动态阈值</td>
+                  <td>预测编码 / UCB</td>
+                </tr>
+                <tr>
+                  <td>Forgetting（什么时候挤）</td>
+                  <td>事件驱动（容量压力时）</td>
+                  <td>库容量 &gt; 阈值</td>
+                  <td>子模优化 / 率失真</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <p>这种多时间尺度结构与认知心理学中的记忆巩固（memory consolidation）理论吻合。Atkinson &amp; Shiffrin 的多存储模型（1968）提出感觉记忆（&lt; 1秒）→ 短期记忆（~30秒）→ 长期记忆（永久）的三级结构 <sup><a href="#ref-39">[39]</a></sup>，每一级有不同的编码深度和淘汰速率。Agent 记忆系统的四级决策管道在工程上复现了这种层级结构，但将其从"固定的时间窗口"泛化为"由价值函数驱动的动态门控"——信息不是因为"存在超过 30 秒"才被巩固到长期记忆，而是因为"它的保留价值超过了当前阈值"。</p>
+          </section>
+        </section>
+
+        <section id="s3-7">
+          <h3>3.7 本章小结</h3>
+
+          <p>统一价值函数是记忆系统的调度核心。它用同一把尺量"记"与"忘"，保证了系统在有限资源下的稳定收敛。四个策略——记什么、怎么记、什么时候记、什么时候挤——都是从同一价值标尺派生的具体决策面。</p>
+
+          <p>本章的理论贡献在于将四个决策面锚定到成熟的信息论与强化学习框架：</p>
+
+          <ul>
+            <li><strong>"记什么"</strong> 的理论根基是 Kolmogorov 复杂度/MDL（<span class="math">$L(H) + L(D \mid H)$</span> 最小化）和 Schmidhuber 的压缩进步理论（好奇心 = 最大化压缩进步）。</li>
+            <li><strong>"怎么记"</strong> 的理论根基是 Shannon 的率失真理论（在给定失真约束下最小化编码率）和 Tishby 的信息瓶颈方法（保留任务相关信息、压缩无关信息）。</li>
+            <li><strong>"什么时候记"</strong> 的理论根基是预测编码（surprise-gated encoding）和 UCB 探索-利用权衡。</li>
+            <li><strong>"什么时候挤"</strong> 的理论根基是子模函数优化（贪心淘汰的近似保证）和率失真理论（遗忘 = 有损压缩）。</li>
+          </ul>
+
+          <p>四个决策面通过统一的价值标尺协同工作——这把标尺的校准信号来自哪里？如果信号来自记忆系统内部（"被检索次数多就是重要"），系统会陷入自指循环——策略训练数据是记忆本身，记忆又被策略塑造，最终向"自己觉得重要的方向"漂移。这是第 4 章要解决的核心问题。</p>
+        </section>
+
+        <section class="references" id="references">
+          <details>
+            <summary><h2>参考文献</h2></summary>
+            <ol>
+            <li data-ref="24"><span id="ref-24">[24]</span> Shannon, C.E. (1948). A mathematical theory of communication. <em>Bell System Technical Journal</em>, 27(3), 379–423. <a href="https://people.math.harvard.edu/~ctm/home/text/others/shannon/entropy/entropy.pdf">PDF</a></li>
+            <li data-ref="25"><span id="ref-25">[25]</span> Simon, H.A. (1956). Rational choice and the structure of the environment. <em>Psychological Review</em>, 63(2), 129–138. <a href="https://pages.ucsd.edu/~mckenzie/Simon1956PsychReview.pdf">PDF</a></li>
+            <li data-ref="26"><span id="ref-26">[26]</span> Russell, S. (1995). Rationality and intelligence. <em>Proceedings of IJCAI</em>. <a href="https://people.eecs.berkeley.edu/~russell/papers/ijcai95-cnt.pdf">PDF</a></li>
+            <li data-ref="27"><span id="ref-27">[27]</span> Rissanen, J. (1978). Modeling by shortest data description. <em>Automatica</em>, 14(5), 465–471. <a href="https://homepages.cwi.nl/~paulv/course-kc/mdlintro.pdf">PDF</a></li>
+            <li data-ref="28"><span id="ref-28">[28]</span> Schmidhuber, J. (2009). Driven by compression progress. <em>Cognitive Science Monographs</em>. <a href="https://arxiv.org/abs/0812.4360">arXiv</a></li>
+            <li data-ref="29"><span id="ref-29">[29]</span> Shannon, C.E. (1959). Coding theorems for a discrete source with a fidelity criterion. <em>IRE National Convention Record</em>, Part 4, 142–163. <a href="https://web.stanford.edu/class/ee376a/files/2017-18/lecture_12.pdf">PDF</a></li>
+            <li data-ref="30"><span id="ref-30">[30]</span> Tishby, N., Pereira, F.C. &amp; Bialek, W. (1999). The information bottleneck method. <em>Proceedings of the 37th Allerton Conference</em>. <a href="https://arxiv.org/abs/physics/0004057">arXiv</a></li>
+            <li data-ref="31"><span id="ref-31">[31]</span> Sutton, R.S. &amp; Barto, A.G. (2018). <em>Reinforcement Learning: An Introduction</em> (2nd ed.). MIT Press. <a href="http://incompleteideas.net/book/the-book-2nd.html">Online</a></li>
+            <li data-ref="32"><span id="ref-32">[32]</span> Auer, P., Cesa-Bianchi, N. &amp; Fischer, P. (2002). Finite-time analysis of the multiarmed bandit problem. <em>Machine Learning</em>, 47(2–3), 235–256. <a href="https://doi.org/10.1023/A:1013689704352">DOI</a></li>
+            <li data-ref="33"><span id="ref-33">[33]</span> Rao, R.P.N. &amp; Ballard, D.H. (1999). Predictive coding in the visual cortex. <em>Nature Neuroscience</em>, 2(1), 79–87. <a href="https://doi.org/10.1038/1828">DOI</a></li>
+            <li data-ref="34"><span id="ref-34">[34]</span> Friston, K. (2010). The free-energy principle: A unified brain theory? <em>Nature Reviews Neuroscience</em>, 11(2), 127–138. <a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC2666703">PMC</a></li>
+            <li data-ref="35"><span id="ref-35">[35]</span> Sutton, R.S. (1988). Learning to predict by the methods of temporal differences. <em>Machine Learning</em>, 3(1), 9–44. <a href="https://doi.org/10.1007/BF00115009">DOI</a></li>
+            <li data-ref="36"><span id="ref-36">[36]</span> Baddeley, A.D. (1992). Working memory. <em>Science</em>, 255(5044), 556–559. <a href="https://doi.org/10.1126/science.1736359">DOI</a></li>
+            <li data-ref="37"><span id="ref-37">[37]</span> Nemhauser, G.L., Wolsey, L.A. &amp; Fisher, M.L. (1978). An analysis of approximations for maximizing submodular set functions—I. <em>Mathematical Programming</em>, 14(1), 265–294. <a href="https://doi.org/10.1007/BF01588971">DOI</a></li>
+            <li data-ref="38"><span id="ref-38">[38]</span> Ng, A.Y., Harada, D. &amp; Russell, S. (1999). Policy invariance under reward transformations. <em>ICML</em>. <a href="https://ai.stanford.edu/~ang/papers/shaping-icml99.pdf">PDF</a></li>
+            <li data-ref="39"><span id="ref-39">[39]</span> Atkinson, R.C. &amp; Shiffrin, R.M. (1968). Human memory: A proposed system and its control processes. In K.W. Spence &amp; J.T. Spence (Eds.), <em>The Psychology of Learning and Motivation</em>, Vol. 2. Academic Press. <a href="https://doi.org/10.1016/S0079-7421(08)60422-3">DOI</a></li>
+          </ol>
+          </details>
+        </section>
+
+      </article>
+    </main>
+  </div>
+
+  <nav class="article-pager">
+    <a href="chapter-2.html" class="article-pager__link">
+      <span class="article-pager__label">上一章</span>
+      <span class="article-pager__title">三层分离的必然性</span>
+    </a>
+    <a href="chapter-4.html" class="article-pager__link article-pager__link--next">
+      <span class="article-pager__label">下一章</span>
+      <span class="article-pager__title">外部锚定与压缩边界</span>
+    </a>
+  </nav>
+
+  <script src="script.js"></script>
+</body>
+</html>

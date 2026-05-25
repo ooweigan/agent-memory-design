@@ -1,0 +1,283 @@
+---
+number: 1
+title: "记忆不是存储"
+fullTitle: "记忆不是存储——定义问题与建立隐喻"
+date: "2026-05-24"
+readingTime: "8"
+navTitle: "记忆不是存储"
+---
+
+## 1.1 一个场景：长期运行的 Agent 需要记住什么
+
+
+
+### 1.1.1 客服 Agent 的三个记忆时刻 {#s1-1-1}
+
+
+
+想象一个长期运行的客服 Agent。它今天收到的第 47 封邮件来自客户 Hans，内容是"上次说的 45 天付款周期，我们财务这边需要调整为 30 天，可以吗？"
+
+
+
+这个 Agent 需要记住什么？
+
+
+
+首先，它需要知道 **Hans 是谁**——他的付款周期之前约定的是 45 天，这是三个月前五封往来邮件逐渐形成的共识。如果它把 Hans 当成新客户，回复"请问您希望的付款周期是多久？"，Hans 会立刻感知到这个 Agent 是失忆的。
+
+
+
+其次，它需要知道 **这次对话在改变什么**——Hans 不是"提出"付款周期，而是"修改"付款周期。这两个词的认知含义完全不同。前者是记录新事实，后者是修订旧事实。如果 Agent 只是把每封邮件当成独立的自然语言理解任务，它就感知不到"变化"本身——而变化才是认知的原材料。
+
+
+
+最后，当 Hans 三天后追问"上次说的 30 天确认了吗？"，Agent 需要知道 **自己当时答应了没有，还是在等上级审批**。这不只是"对话内容是什么"，而是"当时做出了什么决定、处于什么状态"。
+
+
+
+这三个时刻——知道对方是谁、知道什么在被改变、知道自己当时做了什么——定义了 Agent 记忆的真正需求。而这三件事，没有一件是"把对话记录存下来"能解决的。
+
+
+
+### 1.1.2 "记对话记录"与"记对客户的认知"是两件事 {#s1-1-2}
+
+
+
+记对话记录是存储问题。向量数据库、全文索引、归档系统——这些工具解决的是"如何存、如何检索"的问题。它们的目标函数是检索命中率：给定一个查询，能否找到最相关的原始对话片段。
+
+
+
+记对客户的认知是派生问题。一条认知——"Hans 偏好简洁沟通、付款周期敏感、最近三次订单都是 CIF 条款"——不是任何一封邮件的原文，而是从多封邮件、多次交互、多种信号中蒸馏出来的。它不是被"检索"到的，而是被"计算"出来的。它需要在新证据到来时自我修正，而不是被覆盖。它需要在证据矛盾时保留冲突而不是假装一致。它需要知道"我为什么相信这件事"，因为企业场景下这直接关系到合规与审计。
+
+
+
+这是两种完全不同的信息形态。把记忆系统当成"带 embedding 的数据库"来做，就是把认知问题降格成了存储问题。
+
+
+
+从认知心理学的视角看，这个区分有深刻的理论根源。Tulving 在 1972 年首次提出了 **episodic memory 与 semantic memory 的区分** [[1]](#ref-1)：episodic memory 是对个人经历的具体事件的记忆，绑定在特定的时间和空间上下文中（what-where-when），伴随 **autonoetic consciousness**（自知意识）——一种"心理时间旅行"的主观体验，让人能够重新体验过去的事件；semantic memory 则是对世界的一般性知识和事实的结构化记录，**脱离了自传式参照**（detached from autobiographical reference），通过 **noetic consciousness**（知晓意识）访问——知道某个事实但不需要重新体验获得它的场景。
+
+
+
+映射到 Agent 场景：对话记录是 episodic——它保留了"谁在什么时候说了什么"的完整上下文；对客户的认知是 semantic——它从多次 episodic 经历中蒸馏出来，脱离了任何单一交互的上下文。一个只存储 episodic 记录的系统无法高效回答"Hans 的偏好是什么"（需要遍历所有对话），一个只存储 semantic 知识的系统无法回答"我们当时为什么这样判断"（失去了证据链）。两种记忆形态在 Tulving 看来是**相互依存的**——semantic memory 从累积的 episodic 经历中派生，episodic memory 的编码和检索又依赖 semantic schema [[1]](#ref-1)。这正是我们后续架构中 L0 的 Record（episodic trace）与 L1 的 facet（semantic/reflective 派生）之间双向关系的认知科学根据。
+
+
+
+### 1.1.3 当前开源方案的第一印象 {#s1-1-3}
+
+
+
+在进入理论推导之前，先看一眼 2025-2026 年主流开源记忆方案的架构选择，作为后续论证的靶子。
+
+
+
+**mem0**（~48K GitHub stars，EAI 2025 论文，[mem0.ai](https://mem0.ai)）的 API 是 `add` / `get` / `search` / `delete`。这暴露了它的底层心智模型：记忆是被 CRUD 的事实记录。`add` 直接写一条事实，`delete` 物理删除——原始证据消失，没有回滚路径。置信度是一个可以被外部赋值的标量，而不是从证据集派生出来的结果。当 LLM 错判"这条事实与旧事实矛盾"并执行 DELETE 时，被删掉的那个版本永远消失了。mem0 本质上是一个 **LLM-mediated fact store**，它把"记忆"等同于"事实抽取"，self-editing 机制是覆盖式写而非 append-only，也没有 bitemporal 时间维度。
+
+
+
+**Letta/MemGPT**（~21K stars，ICLR 2024 论文，[letta.com](https://www.letta.com)）借鉴了操作系统的虚拟内存思想，让 LLM 通过 function call 自主管理有限的上下文窗口——当上下文满了，它可以把不重要的内容"page out"到外部存储，需要时再"page in"。这个 OS 隐喻在工程上优雅，但同样没有 bitemporal，也没有"信念修订"的概念——它管理的是上下文窗口的占用率，而不是对世界的认知演化。
+
+
+
+**MemoryOS**（EMNLP 2025 Oral，[GitHub](https://github.com/BAI-LAB/MemoryOS)）把记忆按 STM / MTM / LPM 三级缓存组织，按访问频率做晋升降级。这个 OS 隐喻借了形但未借神。真正的认知分层不是按"记了多久"，而是按"记了什么"——心理学上的 episodic / semantic / procedural 区分的是信息的功能角色，不是时间窗口。按 LFU 淘汰记忆的逻辑是 cache 逻辑，不是记忆逻辑：一条几年没访问的童年创伤记忆，按 LFU 早该被踢，但它对"理解此人现在的反应"价值极高。MemoryOS 的 heat-based eviction 解决的是"短上下文如何延展为长上下文"这个工程问题，而不是"Agent 如何对世界形成持久认知"这个认知问题。
+
+
+
+**GraphRAG**（Microsoft，~20K stars，[GitHub](https://github.com/microsoft/graphrag)）的工作流是"离线建实体-关系图 → 社区检测 → 多层级摘要 → 检索时按问题路由层级"。它的核心假设是语料是给定的、静态的、彼此不矛盾的——没有一条假设在 Agent 的世界里成立。Agent 持续观察、持续修订、持续面对矛盾证据。GraphRAG 是一个结构化语料 QA 引擎，不是持续演化的信念系统。当你想"修改一条记忆"的时候，发现整个图都要重算。它是**静态批处理**，没有时间感知。
+
+
+
+**Zep/Graphiti**（~10K+ stars，arXiv [2501.13956](https://arxiv.org/abs/2501.13956)，[getzep.com](https://www.getzep.com)）是现有方案中最接近 Living Document 范式的——它构建了一个 **bitemporal knowledge graph**，支持实体和关系的时间演化追踪。这是值得肯定的架构选择。但它的内核仍然是"知识图谱 + 时序"的组合，而不是从"不可变证据 + 派生信念"的公理出发推导出来的——这意味着当场景偏离"实体-关系"范式（比如需要追踪推理过程的 procedural memory 或 meta-memory），架构的扩展路径不够清晰。
+
+
+
+**Cognee**（~5K stars，[cognee.ai](https://www.cognee.ai)）是一个 graph-native 的 pipeline，强调从非结构化数据自动构建知识图谱。它的设计更偏向数据工程而非认知建模。
+
+
+
+六者的共同症结不在功能不够，而在**把"通用"误解为"功能集合"**。mem0 加更多功能就变 mem1，MemoryOS 加更多层就变 MemoryOS Pro——这条路径走不出通用组件。PostgreSQL 之所以通用，不是因为它内置了所有业务字段，而是因为它给了你 schema、事务、SQL 三样东西就退场。LSM 之所以通用，是因为它只承诺 WAL + memtable + 多层 SSTable + compaction 四样不变量，剩下的 RocksDB / LevelDB / Cassandra 自己拼。通用 = 干净的不变量 + 可组合的算子 + 可替换的策略。
+
+
+
+
+
+
+
+
+## 1.2 Agent 记忆的严格定义：Living Document of Beliefs
+
+
+
+### 1.2.1 从事件溯源到认知溯源 {#s1-2-1}
+
+
+
+事件溯源（Event Sourcing）在软件架构中是一个成熟模式：不存储当前状态，存储导致状态变化的事件序列；当前状态从事件序列中派生 [[12]](#ref-12)。这个思想直接对应到认知场景：Agent 不应该直接存储"我相信什么"，而应该存储"我观察到了什么"，然后把"我相信什么"作为观察的派生结果。
+
+
+
+但认知溯源比事件溯源多了一层难度。事件溯源里，事件到状态的派生函数通常是确定性的——账户余额 = 所有交易记录的正负求和。认知溯源里，观察事件到信念的派生函数本身会演化。同一个"客户要求改为 30 天付款"的观察，在第一次发生时是"新事实"，在第五次发生时是"强化已有信念"，在客户突然说"等等，先别改"时成为"被挑战的信念"。派生函数不是固定的数学公式，它需要持续判断新证据与旧信念之间的关系。
+
+
+
+这里有一个认知科学的深层对应。McClelland 等人在 1995 年提出的 **Complementary Learning Systems (CLS) 理论** [[5]](#ref-5) 指出，大脑有两套互补的学习系统：**海马体**（hippocampus）负责快速编码新经历（one-shot learning），**新皮层**（neocortex）负责缓慢提取结构化知识。海马体像一个临时缓冲区——新经历先在这里快速存储，然后通过 **replay**（重放）机制在休息/睡眠期间逐批传递给新皮层，每次重放只微调新皮层的连接权重，经过多次重放后知识被渐进地整合进新皮层的结构中。这个设计解决了一个核心矛盾：**快速学习会导致灾难性遗忘**（catastrophic forgetting）——神经网络如果用新数据快速训练会覆盖旧知识，而海马体的临时存储隔离了"快速编码"和"缓慢整合"两个过程。
+
+
+
+映射到 Agent 记忆：L0 的 Record ledger 对应海马体——快速、忠实、逐条记录原始观察；L1 的 facet 派生对应新皮层——从 Record 中缓慢蒸馏出结构化信念。两者的分离不是工程上的便利，而是认知系统处理"快速输入 + 稳定知识"这一矛盾的**唯一已知解法**。
+
+
+
+### 1.2.2 从事实数据库到可修订信念 {#s1-2-2}
+
+
+
+事实数据库的 CRUD 语义隐含了一个假设：事实有一个"正确版本"，写操作是把旧版本更新为新版本。但认知不是这样工作的。认知的核心特征是可修订性——不是"用正确答案替换错误答案"，而是"新证据改变了我们对同一事物的判断，但旧判断本身也是曾经合理的"。
+
+
+
+这意味着记忆系统必须同时保留"旧判断"和"新证据"，以及两者之间的关系。当用户问"你为什么相信 Hans 的付款周期是 45 天"时，系统应该能追溯到三封邮件作为证据，而不是回答"因为数据库里这么存的"。当新邮件到来表明付款周期实际上已经改成 30 天时，系统不是删除 45 天这条记录，而是标记它"在 2024-03 至 2026-05-20 期间为真"——这正是双时间维度（bitemporal）的必要性。
+
+
+
+认知心理学中有一个与"可修订信念"直接对应的机制：**memory reconsolidation**（记忆再巩固）。Nader 等人在 2000 年的里程碑论文中证明 [[10]](#ref-10)：已经巩固的记忆在被**重新激活**（retrieved）后，会重新进入一个**不稳定窗口**（labile state），在这个窗口期内记忆可以被**修改、增强或削弱**——这个过程需要重新进行蛋白质合成来再次稳定（reconsolidation）。这不是理论上的猎奇发现，而是记忆系统"可修订性"的神经科学根据：**已有的信念不是刻在石头上的，每次被调用都是一次潜在的修订机会**。
+
+
+
+映射到 Agent 记忆：每次 `recall`（检索）不仅是读操作，也是一次潜在的更新契机——被调出的记忆应该有机会与当前上下文整合新信息。但修订不是覆盖：reconsolidation 的更新是**叠加在原有痕迹之上**的，原始痕迹在某种条件下仍可恢复。这与我们 L0 的"永不拒写 + 仲裁即证据"设计直接同构——修订通过追加新证据实现，原始证据被 `supersede` 但不被物理删除。
+
+
+
+另一个关键理论是 Bartlett 1932 年提出的 **Schema 理论** [[6]](#ref-6)：记忆不是对外部世界的忠实复制，而是**重建性的**（reconstructive）——由已有的知识结构（schema）引导重建。Bartlett 的经典实验让英国被试阅读一个不熟悉的北美原住民民间故事，回忆结果显示出系统性扭曲：不熟悉的细节被省略、合理化或替换为文化上熟悉的元素。van Kesteren 等人 2012 年的神经科学研究进一步发现 [[7]](#ref-7)：**schema-consistent 的信息可以绕过海马体直接编码进新皮层**（快速通道），而 **schema-inconsistent 的信息则需要海马体的慢速编码**——预期与现实之间的不匹配触发一个 **prediction error 信号**，增强记忆编码。
+
+
+
+这对 Agent 记忆设计有两个直接启示：第一，Agent 的"信念重建"过程天然带有 schema 引导的偏差——系统需要用 source monitoring 机制区分"直接观察到的"和"被 schema 引导推断的"，否则会产生"AI 幻觉"式的人类 false memory。第二，**surprise（惊奇度）是天然的重要性信号**——与现有 schema 严重不匹配的观察应该被更强烈地编码，因为它携带的增量信息最大。
+
+
+
+### 1.2.3 工作记忆的容量约束：为什么上下文窗口总是不够的 {#s1-2-3}
+
+
+
+在讨论 Living Document 的定义之前，需要先建立一个不可回避的工程约束：Agent 的工作记忆是**容量极其有限的**。
+
+
+
+Baddeley 和 Hitch 在 1974 年提出的工作记忆模型 [[2]](#ref-2) 将工作记忆分解为多个子系统：**中央执行器**（central executive，注意力控制）、**语音环路**（phonological loop，处理语言信息，衰减周期约 2 秒）、**视觉空间画板**（visuospatial sketchpad），以及后来在 2000 年补充的 **episodic buffer**（将多模态信息整合为统一的情节）。Miller 在 1956 年的经典论文 [[3]](#ref-3) 指出短期记忆容量为 **7±2 个 chunk**；Cowan 在 2001 年进一步修正为 **4±1 个 chunk**（在不允许复述、注意力集中的条件下）[[4]](#ref-4)。
+
+
+
+LLM 的 context window 可以被理解为 Agent 的工作记忆。虽然近年来 context window 从 4K 扩展到 100K 甚至 1M token，但 **注意力机制本身是有损通道**——即便技术上能把 1M token 塞进去，模型对中间位置信息的注意力显著衰减（"lost in the middle"现象）。这意味着无论 context window 多大，Agent 的有效工作记忆容量始终受到注意力瓶颈的约束，只是绝对数字不同。
+
+
+
+Ebbinghaus 在 1885 年的遗忘曲线实验 [[9]](#ref-9) 则从另一个角度确认了记忆的衰减规律：记忆保持量随时间呈**幂函数衰减**（power law forgetting）——学习后 20 分钟保留约 58%，1 小时后约 44%，1 天后约 33%，31 天后约 21%。每次复述/检索会重置衰减曲线并使其变缓（**spacing effect**，间隔效应）。这意味着 Agent 记忆系统不能假设"存了就能一直用"——不被强化的记忆会自然衰减，而被反复调用的记忆会越来越稳固。
+
+
+
+这三个约束——容量有限、注意力有损、自然衰减——共同决定了 Agent 记忆不能是"全量存储 + 全量检索"的朴素模型，而必须是一个**主动管理的、价值驱动的、分层组织的**系统。
+
+
+
+### 1.2.4 来源监控：区分"看到的"和"推断的" {#s1-2-4}
+
+
+
+在多源信息持续流入的 Agent 系统中，一个容易被忽视但至关重要的问题是：**每条记忆从哪里来？**
+
+
+
+Johnson 和 Raye 在 1981 年提出的 **Source Monitoring Framework** [[8]](#ref-8) 指出，人类记忆系统需要持续区分信息的来源：是从外部感知到的（external），还是内部生成的（internal，如推理、想象）。区分的依据是记忆痕迹的特征——来自感知的记忆通常携带更多的感官细节和上下文信息，来自内部生成的记忆则携带更多的认知操作痕迹（推理过程）。当来源信息不够显著时，就会发生**来源监控错误**——比如把推断出来的结论误认为是直接观察到的事实。
+
+
+
+Johnson 等人 1993 年将框架扩展为三种类型 [[8]](#ref-8)：**reality monitoring**（区分内在生成 vs 外在感知）、**external source monitoring**（区分不同外部来源）、**internal source monitoring**（区分不同内在来源，如"想过"还是"梦过"）。
+
+
+
+这对 Agent 记忆的映射是直接的：系统必须在每个记忆条目上标注**来源类型**——是用户直接说的（observed）、工具/API 返回的（retrieved）、Agent 自己推断的（inferred）、还是 Agent 生成/建议的（generated）。来源混淆的后果是灾难性的：如果 Agent 把自己推断的"Hans 可能偏好简洁沟通"当成"Hans 亲口说过偏好简洁沟通"来回复，就犯了一个 reality monitoring 错误——把内部生成的当成了外部感知的。这在企业场景下是合规事故。
+
+
+
+这条要求将在 L0 内核中体现为 **evidence 的 sourceType 字段**——每条证据必须携带不可伪造的来源标注，并且来源标注在整条派生链上可追溯。
+
+
+
+### 1.2.5 Living Document 的操作性定义：四条硬约束 {#s1-2-5}
+
+
+
+把以上讨论收敛为可操作的约束，Agent 记忆系统必须同时满足：
+
+
+
+**C1：必须能回答"我为什么相信"。** 每条认知必须有可追溯的证据链，从当前信念向下可以钻取到原始观察记录。没有证据链的信念是"无源信仰"，在企业场景里是合规死结。这对应 Source Monitoring 的要求——来源必须在整条链上可追溯。
+
+
+
+**C2：必须能在新证据到来时修正而不是覆盖。** 修正意味着保留旧信念的完整历史（包括它曾经为真的时间区间），同时加入新证据形成新信念。覆盖意味着旧信念消失，无法回答"我当时为什么那样判断"。这对应 Memory Reconsolidation 的机制——被激活的记忆可以被更新，但更新是叠加而非覆盖。
+
+
+
+**C3：必须能在不同时间点上回看"当时我相信什么"。** 审计、复盘、合规都要求系统能在任意历史时刻回答"系统在 2026 年 3 月 15 日的信念状态是什么"。这要求记忆存储同时记录"世界何时为真"和"我们何时知道"——即 Snodgrass 在 1999 年定义的 bitemporal 双时间维度 [[11]](#ref-11)。
+
+
+
+**C4：必须能在有限的上下文窗口里把最有价值的认知装进去。** LLM 的上下文窗口虽然持续扩大，但注意力机制的有损性（Miller/Cowan 的容量约束）和 Ebbinghaus 的衰减规律意味着，记忆系统必须有价值函数驱动的取舍机制，在每次需要做决策时，把边际价值最高的认知子集装进 prompt。
+
+
+
+这四条约束，每一条都排斥"记忆 = 向量数据库 + CRUD"的简单模型。它们共同指向一个更复杂的系统——一个以不可变证据为底座、以派生为基本操作、以价值函数为调度核心的认知存储与检索系统。这就是接下来要建构的东西。
+
+
+
+
+
+
+
+
+## 1.3 本章小结
+
+
+
+本章从客服 Agent 的具体场景出发，借助认知心理学和神经科学的理论基础——Tulving 的记忆分类学、McClelland 的互补学习系统、Baddeley 的工作记忆模型、Ebbinghaus 的遗忘曲线、Bartlett 的 schema 理论、Nader 的记忆再巩固、Johnson 的来源监控框架——论证了 Agent 记忆的本质不是"存储对话记录"，而是"维护一份从证据中持续派生的、可修订的 Living Document of Beliefs"。这个定义自然导出四条硬约束——可追溯的证据链、修正而非覆盖的更新语义、可回看的历史状态、有限注意力下的择优投影。这四个约束将成为推导整个三层架构的逻辑起点。
+
+## 参考文献
+
+[1] Tulving (2002) — Episodic memory: From mind to brain. [PubMed](https://pubmed.ncbi.nlm.nih.gov/11752477/)
+
+[2] Baddeley, A.D. & Hitch, G. (1974). Working memory. *Psychology of Learning and Motivation*, 8, 47–89. [DOI](https://doi.org/10.1016/S0079-7421(08)60452-1)
+
+[3] Miller, G.A. (1956). The magical number seven, plus or minus two. *Psychological Review*, 63(2), 81–97. [Link](https://psychclassics.yorku.ca/Miller/)
+
+[4] Cowan, N. (2001). The magical number 4 in short-term memory. *Behavioral and Brain Sciences*, 24(1), 87–114. [DOI](https://doi.org/10.1017/S0140525X01000020)
+
+[5] McClelland, J.L., McNaughton, B.L. & O'Reilly, R.C. (1995). Why there are complementary learning systems in the hippocampus and neocortex. *Psychological Review*, 102(3), 419–457. [DOI](https://doi.org/10.1037/0033-295X.102.3.419)
+
+[6] Bartlett, F.C. (1932). *Remembering: A Study in Experimental and Social Psychology*. Cambridge University Press. [Wikipedia](https://en.wikipedia.org/wiki/Remembering_(book))
+
+[7] van Kesteren, M.T.R. et al. (2012). How schema and novelty augment memory formation. *Trends in Neurosciences*, 35(5), 211–219. [DOI](https://doi.org/10.1016/j.tins.2012.01.007)
+
+[8] Johnson, M.K. & Raye, C.L. (1981). Reality monitoring. *Psychological Review*, 88, 67–85. [DOI](https://doi.org/10.1037/0033-295X.88.1.67)
+
+[9] Ebbinghaus, H. (1885). *Über das Gedächtnis*. Duncker & Humblot. [Link](https://psychclassics.yorku.ca/Ebbinghaus/index.htm)
+
+[10] Nader, K., Schafe, G.E. & LeDoux, J.E. (2000). Fear memories require protein synthesis in the amygdala for reconsolidation after retrieval. *Nature*, 406, 722–726. [DOI](https://doi.org/10.1038/35015072)
+
+[11] Snodgrass, R.T. (1999). *Developing Time-Oriented Database Applications in SQL*. Morgan Kaufmann. [PDF](https://www2.cs.arizona.edu/~rts/tdbbook.pdf)
+
+[12] Fowler, M. Event Sourcing. [Link](https://martinfowler.com/eaaDev/EventSourcing.html)
+
+[13] Parnas, D.L. (1972). On the criteria to be used in decomposing systems into modules. *Communications of the ACM*, 15(12), 1053–1058. [DOI](https://doi.org/10.1145/361598.361623)
+
+[14] Codd, E.F. (1970). A relational model of data for large shared data banks. *Communications of the ACM*, 13(6), 377–387. [DOI](https://doi.org/10.1145/362384.362685)
+
+[15] O'Neil, P. et al. (1996). The log-structured merge-tree. *Acta Informatica*, 33(4), 351–385. [DOI](https://doi.org/10.1007/s007780050006)
+
+[16] Helland, P. (2015). Immutability changes everything. *CIDR '15*. [PDF](https://www.cidrdb.org/cidr2015/Papers/CIDR15_Paper16.pdf)
+
+[17] Gupta, A. & Mumick, I.S. (1999). *Materialized Views: Techniques, Implementations, and Applications*. MIT Press. [DOI](https://doi.org/10.1007/BFb0000379)
+
+[18] Mem0. [mem0.ai](https://mem0.ai)
+

@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>边界与开放问题 — Agent 记忆系统</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="progress-bar"></div>
+  <nav class="article-nav">
+    <a href="index.html" class="article-nav__back">返回系列</a>
+    <span class="article-nav__title">边界与开放问题</span>
+    <button class="nav-toggle" aria-label="菜单" aria-expanded="false">
+      <span class="nav-toggle__bar"></span>
+      <span class="nav-toggle__bar"></span>
+      <span class="nav-toggle__bar"></span>
+    </button>
+  </nav>
+
+  <header class="article-hero">
+    <div class="container">
+      <span class="article-hero__chapter animate-in">第6章</span>
+      <h1 class="article-hero__title animate-in animate-delay-1">边界与开放问题——诚实标注框架的极限</h1>
+      <p class="article-hero__meta animate-in animate-delay-2">程乾 · 2026-05-24 · 约 12 分钟</p>
+    </div>
+  </header>
+
+  <div class="article-layout">
+    <aside class="article-layout__sidebar">
+      <nav class="toc">
+        <div class="toc__title">目录</div>
+        <ul class="toc__list">
+          <li><a href="#s6-1">6.1 实体共指</a></li>
+          <li><a href="#s6-2">6.2 Procedural 记忆的形态空缺</a></li>
+          <li><a href="#s6-3">6.3 多 Agent 共享与 R_task 归因</a></li>
+          <li><a href="#s6-4">6.4 代理目标的 selection bias</a></li>
+          <li><a href="#s6-5">6.5 派生失败的回退与自愈</a></li>
+          <li><a href="#s6-6">6.6 派生物的 freshness 与版本绑定</a></li>
+          <li><a href="#s6-7">6.7 元记忆的归属问题</a></li>
+          <li><a href="#s6-8">6.8 与 LLM 工作记忆的边界</a></li>
+          <li><a href="#s6-9">6.9 Benchmark 的碎片化与可比性困境</a></li>
+          <li><a href="#s6-10">6.10 全文总结</a></li>
+          <li><a href="#references">参考文献</a></li>
+        </ul>
+      </nav>
+    </aside>
+    <main class="article-layout__content">
+      <article class="article-content">
+
+        <p class="lead">一个值得信任的框架，不是声称无所不包的框架，而是精确知道自己边界的框架。本章逐一标注在当前理论框架内尚未解决的问题，结合 2025-2026 年最新的学术进展，既标注问题也指明当前最前沿的探索方向。</p>
+
+        <section id="s6-1">
+          <h3>6.1 实体共指：保留歧义为 first-class 状态</h3>
+
+          <p>"上次开会那个人说……"——Agent 是否能确定地把这句话挂到正确的实体上？当前工程实践倾向于"宁漏归不错归"——把推理器消歧关掉，宁可漏掉一条认知也不错误归因到错误实体。但这只是回避，不是解决。</p>
+
+          <p>真正想要的是：<strong>保留歧义本身作为 first-class 状态</strong>。当系统无法确定"那个人"是张总还是李总时，这条认知应该以 disjunctive 形式存在——它同时指向两个实体，置信度按可能性分配。当后续证据（比如又一封邮件明确了上次会议只有张总参加）进入时，歧义被被动消解，不需要在不确定时强行裁决。但这需要 L1 的 entity ontology 支持"指向多个实体的 disjunctive facet"，目前工程上还不成熟。</p>
+
+          <p>从逻辑学的角度，disjunctive facet 本质上是一个析取命题："这条记忆关于 张总 ∨ 李总"。在经典逻辑中，析取命题的真值在任一析取项为真时即为真——这意味着 disjunctive facet 的置信度应该是两个析取项置信度的最大值，而非平均值。但这个逻辑语义在工程上的实现并不简单：当系统需要按实体检索时，disjunctive facet 应该在"张总"和"李总"的索引下都出现，但其置信度在两个索引下不同（如果后续证据支持张总，则张总索引下的置信度高于李总索引下的）。这要求索引层支持"同一 facet 在不同 key 下有不同权重"——比当前的简单 key-value 索引复杂得多。</p>
+
+          <p>工程上更可行的一种近似方案是<strong>延迟消解</strong>（lazy resolution）：在写入时创建两个 facet 引用——一个指向张总，一个指向李总——每个引用携带独立的置信度分数。两个引用共享同一份证据集，但各自的置信度由独立的贝叶斯更新规则维护。当新证据到达时，两个引用的置信度按贝叶斯规则分别更新——支持张总的证据增加张总引用的置信度，同时降低李总引用的置信度（因为两者是互斥假设）。当任一引用的置信度超过阈值（如 0.9）时，自动触发消解：高置信引用保留，低置信引用被 supersede。这种方案保持了 L0 的 append-only 语义（消解是追加一条仲裁证据，不是删除），同时将 disjunctive 状态的维护成本限制在了 O(k)（k 是析取项数，通常很小）。</p>
+
+          <p>Zep/Graphiti 的 bitemporal 知识图谱 <sup><a href="#ref-20">[20]</a></sup> 在实体解析方面做了最前沿的工程探索。Graphiti 维护了一个带有时间戳的实体-关系图，当新信息可能指向已有实体时，它通过 LLM 驱动的实体解析器判断是"创建新实体"还是"合并到已有实体"。但 Graphiti 的实体解析仍然是二元决策（新实体 or 合并），不支持 disjunctive 中间态。当解析器不确定时，Graphiti 倾向于创建新实体——这导致了实体碎片化问题（同一真实实体在图中存在多个节点）。</p>
+
+          <p>"A-Mem: Agentic Memory"（NeurIPS 2025 <sup><a href="#ref-58">[58]</a></sup>）受 Zettelkasten 笔记法启发，提出了一个基于动态链接的记忆系统：每条记忆是一个自治节点，通过双向链接与其他记忆关联。在这种架构下，共指消解不再是写入时的一次性决策，而是通过链接图的演化逐步收敛——两个指向同一实体的记忆节点，随着证据积累逐渐被合并。"Memory for Autonomous LLM Agents" 综述 <sup><a href="#ref-54">[54]</a></sup> 将实体共指列为 Agent 记忆系统的核心开放问题之一，指出当前所有主流系统（包括 Letta、Mem0、Zep）都没有完美解决跨会话的实体对齐。</p>
+        </section>
+
+        <section id="s6-2">
+          <h3>6.2 Procedural 记忆的形态空缺</h3>
+
+          <p>在 L1 的五种 cognitive type 里，semantic 是"一句话 + 证据"，episodic 是"一次事件"，reflective 是"一个归纳"——这三种都有清晰的派生形态。但 procedural（"怎么完成 X 类任务"）该长什么样？是一条 facet 还是一张行为图？是静态的 workflow template 还是从成功/失败案例中动态抽取的 pattern？</p>
+
+          <p>当前最接近的实践是把 procedural 表达为"成功/失败案例集合 + 抽出的 schema"——但 schema 的派生函数远比文本融合复杂，而且 procedural 知识天然具有层级结构（子任务 → 步骤 → 具体操作），单层 facet 的扁平结构可能不足以表达。Procedural 记忆的另一个独特性质是<strong>条件敏感性</strong>：同一种任务类型在不同上下文下可能需要完全不同的执行路径。"给客户回邮件"这个 procedural schema，根据客户的情绪状态（愤怒 vs. 友好）、合同阶段（谈判中 vs. 已签约）、文化背景（直接 vs. 含蓄）需要完全不同的行为策略——这不是一个静态模板能覆盖的，而是一个需要动态条件分支的行为树。</p>
+
+          <p>Letta/MemGPT 在 2025-2026 年推出的 <strong>Skill Learning</strong> 功能 <sup><a href="#ref-19">[19]</a></sup> 提供了一种工程化的近似：Agent 从成功的行为序列中抽取可复用的 skill，存储为可序列化的 Agent File (.af) 格式。这本质上是把 procedural 记忆表达为"行为模板 + 适用条件"的二元组——但它的派生逻辑（如何从多个成功案例中归纳出一个通用 skill）仍然是启发式的，缺乏理论基础。Letta 的 Skill Learning 采用的是一种"事后诸葛亮"式的归纳：先观察成功的行为序列，再用 LLM 提取共同模式。这与人脑中 procedural 记忆的形成机制有本质差异——人脑的 procedural 记忆是通过试错（trial-and-error）和强化（reinforcement）逐步形成的，不是通过一次性归纳。</p>
+
+          <p>Kumaran, Hassabis 和 McClelland（2016）在更新互补学习系统理论时提出了一个关键问题："What learning systems do intelligent agents need?" <sup><a href="#ref-57">[57]</a></sup>。他们指出，智能 Agent 需要的不仅是从经验中提取模式的能力（这是 declarative memory 的工作），还需要从行为结果中学习策略的能力（这是 procedural memory 的工作）。在人脑中，这两者依赖不同的神经回路——海马体-新皮层回路处理 declarative 记忆，基底神经节-前额叶回路处理 procedural 记忆。当前 Agent 记忆系统几乎全部只实现了前者，后者的工程对应物仍然是空白。</p>
+
+          <p>从 L0 不变量的角度审视，procedural 记忆的形态空缺触及了一个更根本的问题：L0 的五条不变量——Record 不可变、Memory 是派生、证据集而非计数器、永不拒写、仲裁即证据——全部是从 declarative 记忆的角度设计的。一条 procedural schema 的"证据"是什么？它不是一个可以被 true/false 判定的事实命题，而是一个行为策略的有效性统计——"在条件 C 下执行动作 A 的成功率为 80%（基于 15 次尝试）"。这种概率性的、行为性的知识是否能用当前的 facet + evidence 表达？诚实的回答是：勉强可以，但不自然。</p>
+
+          <p>一种可能的扩展方向是为 procedural 记忆引入<strong>二元 facet 形态</strong>：一条 procedural facet 由两部分组成——(1) 一个结构化的行为模板（action template），描述"在什么条件下做什么"；(2) 一个统计性的证据摘要（evidence summary），记录"这个模板在历史上的执行次数、成功次数、失败模式"。行为模板可以从多个成功案例中通过 LLM 驱动的 schema induction 派生出来，统计摘要则由系统自动维护——每次执行后更新计数。这种设计保持了 L0 不变量的核心精神（证据是不可变的执行记录，procedural facet 是从执行记录中派生的），同时为 procedural 知识提供了更自然的表达形态。但这种扩展是否足够覆盖所有 procedural 知识（包括条件分支、异常处理、子任务递归），仍然是一个开放问题。</p>
+
+          <p>这个问题在框架内是诚实的空白，需要进一步的工作。</p>
+        </section>
+
+        <section id="s6-3">
+          <h3>6.3 多 Agent 共享与 R_task 的团队归因</h3>
+
+          <p>L2 的策略由 R_task 驱动。但在多 Agent 场景下，一个 Agent 的 R_task（"我的用户满意度"）和团队的 R_task（"整体任务完成率"）可能冲突。如果个体的 L2 策略完全由个体 R_task 驱动，Agent 就没有动机共享知识或接受队友的纠正——因为分享一条自己辛苦积累的 procedural 知识，可能导致队友抢走自己的任务，从而降低自己的 R_task。</p>
+
+          <p>这个问题可以用<strong>博弈论</strong>视角来分析。在多 Agent 知识共享的场景中，每个 Agent 面临一个经典的囚徒困境：共享知识对团队整体有利，但对个体可能不利（特别是当 Agent 的绩效独立评估时）。如果 R_task 的定义是纯个体的，纳什均衡将是"不共享"——每个 Agent 都囤积自己的知识，即使这导致团队整体效率下降。博弈论的解决方案有两条路径：(1) 改变激励结构（机制设计），使共享成为个体理性选择；(2) 改变信息结构（透明化），使不共享的 Agent 受到可观察的声誉惩罚。</p>
+
+          <p>第一种路径的一种可能实现是引入<strong>Shapley value</strong> 归因：将团队的总 R_task 按每个 Agent 对最终结果的边际贡献分配。Agent i 的 Shapley value 定义为：</p>
+
+          <pre><code>φᵢ = Σ_{S⊆N\{i}} (|S|!(|N|-|S|-1)!/|N|!) × [v(S∪{i}) - v(S)]</code></pre>
+
+          <p>其中 v(S) 是 Agent 集合 S 能达到的团队 R_task。Shapley value 保证了"如果我的知识分享帮助队友完成了任务，我也能从中获得归因"——从而在激励层面打通个体与团队。Shapley value 满足四条公理：效率（所有价值被完全分配）、对称性（等价 Agent 获得等量归因）、虚拟性（无贡献者获得零归因）、可加性（分量可独立计算后相加）。这使它成为理论上的理想归因方案。但 Shapley value 的计算复杂度是指数级的（需要遍历所有子集），在大规模多 Agent 场景下需要采样近似——Monte Carlo 采样是最常用的方法，通常几百次采样就能获得足够精确的估计。</p>
+
+          <p>"Constitutional Memory Architecture"（arXiv 2603.04740, 2026 <sup><a href="#ref-55">[55]</a></sup>）提出了一种不同的路径：通过"宪法"（constitution）来约束 Agent 的记忆管理行为，包括共享规则。宪法可以规定"任何 Agent 获取的关于客户 X 的信息必须对所有服务 X 的 Agent 可见"——这是一种从外部强制的共享机制，不依赖 Agent 的自愿合作。但它的代价是丧失了个体策略的灵活性。宪法机制的深层哲学问题是：谁来制定宪法？宪法本身的更新是否需要所有 Agent 投票？这将多 Agent 记忆共享的问题从技术层面上升到了治理层面。</p>
+
+          <p>从机制设计（mechanism design）的角度，最理想的多 Agent 记忆共享方案应该满足<strong>激励兼容</strong>（incentive compatibility）：每个 Agent 在追求自身 R_task 最大化的同时，自然地做出了对团队最优的记忆共享决策。Shapley value 归因 + 宪法约束是一种尝试，但它依赖于 R_task 的可度量性和可归因性——在很多实际场景中，团队 R_task 是一个整体指标（如"客户满意度"），无法精确拆解到单个 Agent 的贡献。当归因不可行时，退而求其次的方案是<strong>声誉机制</strong>（reputation mechanism）：Agent 的共享行为被公开记录，长期来看"乐于共享"的 Agent 会获得更多的协作机会和资源分配——这是一种基于重复博弈的隐式激励，不依赖精确的 R_task 归因。</p>
+
+          <p>当前框架只处理单 Agent，多 Agent 的 R_task 归因是显式缺口。从一开始就需要决定 R_task 是"个体的"还是"团队归因后的"，否则未来加多 Agent 时 L2 要推倒重做。</p>
+
+          <p>从 L0 不变量的角度，多 Agent 共享还带来了一个更具体的技术挑战：<strong>Record 的跨 Agent 可见性</strong>。L0 的 Record 不可变性保证了单 Agent 内部的证据链完整性，但当 Agent A 向 Agent B 共享一条 facet 时，B 收到的是 A 的派生结果而非原始 Record——证据链在 Agent 边界处断裂了。B 无法追溯这条 facet 的原始证据，因为那些 Record 存在 A 的 Record ledger 中。一种工程方案是共享 Record 引用而非 facet 副本——但 Record 引用能否跨 Agent 边界，取决于底层存储系统的访问控制粒度。这在技术上不是不可解的问题（可以用 capability-based access control），但它需要 L0 在设计时就考虑跨实例的 Record 可见性——当前的五条不变量中没有涉及这一点。</p>
+        </section>
+
+        <section id="s6-4">
+          <h3>6.4 代理目标的 selection bias</h3>
+
+          <p>第 4.4 节提出的三层代理目标（即时启发式 → 短期反馈 → 长期 R_task）隐含了一个陷阱。即时启发式的初始权重是人工设定的，带有人类先验。而在系统部署的早期，即时启发式主导写入决策——这意味着早期写入的 facet 集本身被这套先验筛过。当长期 R_task 信号终于到达、准备反向校准即时启发式的权重时，它能拿到的训练样本已经是被先验过滤后的子集。</p>
+
+          <p>这是一个 deployed policy 下的<strong>选择偏差</strong>（selection bias）问题：校准只能在被早期策略选中的样本上做，被早期策略过滤掉的样本——那些可能真正重要但不符合人类先验的信息——永远失去了被重新评估的机会。从强化学习的角度，这本质上是一个<strong>探索-利用困境</strong>（exploration-exploitation dilemma）的变体：过度利用当前策略（只记录高分信息）会导致对未知领域的探索不足（错过不符合先验的重要信息）。标准的解决方案是 ε-greedy 或 Upper Confidence Bound（UCB）策略——以一定概率随机探索，即使当前策略认为某条信息价值低，也有机会被写入。</p>
+
+          <p>Mem0 在 2026 年的算法大修 <sup><a href="#ref-18">[18]</a></sup> 中面对了类似的问题。他们的被动提取（passive extraction）机制——由 LLM 判断哪些信息"值得记住"——在 ECAI 2025 的论文中被独立评测发现 LongMemEval 得分仅 49.0%。一个关键原因是提取策略的先验偏差：LLM 倾向于提取显式的事实陈述，而忽略隐含的关系变化和情境暗示。2026 年的更新通过引入时间推理能力（temporal queries +29.6 分）和多跳推理（multi-hop reasoning +23.1 分）部分缓解了这个问题，但根本的选择偏差仍然存在——被早期策略漏掉的信息无法被"找回"。</p>
+
+          <p>一个可能的部分解法是冷热分离写入通道：被即时启发式判为低分的信息不参与投影但进入冷存储，为未来的离线校准保留一条反事实数据通道。MemoryOS（EMNLP 2025 <sup><a href="#ref-21">[21]</a></sup>）的三级缓存架构（STM/MTM/LPM）提供了一种工程化的近似：低分信息不是被删除，而是被降级到 LPM（Long-term Personal Memory）层，保留了未来被重新激活的可能性。在 LoCoMo 基准上，MemoryOS 实现了 +49.11% 的 F1 提升，部分归功于这种"降级但不丢弃"的策略。但这不完美——冷存储仍然占用资源，而且长期 R_task 很难归因到被冷藏的个体记忆上。</p>
+
+          <p>更根本的问题是：<strong>冷存储中被冷藏的记忆，其"冷藏"标签本身就带有选择偏差</strong>。如果系统在时间 T1 用策略 P1 将某条记忆判为低分并降级到冷存储，然后在时间 T2 用校准后的策略 P2 回来评估——P2 评估的是"已被 P1 筛选后的冷存储内容"，而非"如果用 P1 从头筛选会得到什么"。冷存储中不存在的信息（被 P1 完全丢弃而非降级的）仍然是不可恢复的。这意味着冷热分离只能缓解而非消除选择偏差。</p>
+
+          <p>从理论角度看，这个问题与因果推断中的<strong>反事实推理</strong>（counterfactual reasoning）有深层联系：我们想知道"如果当初用策略 P2 而非 P1 来筛选，记忆库会是什么样子"——但历史无法重来，被 P1 丢弃的信息已经丢失。因果推断中的倾向得分匹配（propensity score matching）提供了一种部分解法：记录每条信息被 P1 丢弃时的"丢弃分数"（propensity），在离线校准时按倾向得分加权调整——但前提是丢弃决策的完整日志必须被保留（这又回到了"永不拒写"的变体：拒写可以，但拒写决策本身必须被记录）。这个问题没有圆满的工程方案，标注在此。</p>
+        </section>
+
+        <section id="s6-5">
+          <h3>6.5 派生失败的回退与自愈</h3>
+
+          <p>第 2 章的"永不拒写"原则面临一个沉默的敌人：不是主动拒写，而是被动丢失。当 Extract 管道因 LLM 返回格式错误而静默丢弃数据时，当 Worker 进程意外停止而无人察觉时，系统把"我没有工作"翻译成了"无事发生"——用户问"系统有昨天开会的记录吗"，系统的回答是"没有找到相关记录"。这在技术上是诚实的，在用户体验上是灾难性的。</p>
+
+          <p>"LLM Agent Memory: A Survey from a Unified Representation"（ACL ARR 2026 <sup><a href="#ref-59">[59]</a></sup>）对当前主流记忆系统的故障模式进行了系统性分析，发现<strong>静默丢失</strong>（silent loss）是最常见且最难检测的故障类型。与显式错误（如 JSON parse 失败并抛出异常）不同，静默丢失不产生任何日志或指标——系统不知道自己丢失了数据，因此无法触发恢复机制。综述将静默丢失分为三类：(1) <strong>提取失败</strong>——LLM 未能从原始文本中识别出有价值的信息；(2) <strong>传输失败</strong>——提取成功但写入管道中断；(3) <strong>覆盖失败</strong>——新信息错误地覆盖了旧信息。三种失败的共同特征是"系统状态看起来正常"——没有异常、没有告警、没有错误日志。</p>
+
+          <p>框架层面需要的补丁是：<strong>任何"没有找到"的结论，必须先经过原始 transcript 的验证</strong>。如果原始 chat/邮件 transcript 里确实有相关内容，但派生管道没有产出对应的 facet，系统应该自我诊断"派生失败"并触发重派生，而不是对用户说"没有"。这不是架构核心，但它是"永不拒写"在工程上不被架空的必要防线。</p>
+
+          <p>从认知心理学的角度，这对应了 Tulving 所区分的<strong>可用性</strong>（availability）与<strong>可达性</strong>（accessibility）：信息可能存在于记忆中（available），但在当前检索线索下无法被找到（not accessible）。一个健壮的记忆系统必须区分这两种情况——"我没有这条记忆"和"我有这条记忆但当前找不到"是完全不同的系统状态，需要不同的应对策略。对前者，系统应诚实回答"无此记录"；对后者，系统应切换检索策略（换检索线索、扩大时间窗口、降低匹配阈值）再试。</p>
+
+          <p>自愈（self-healing）的进一步要求是<strong>幂等重派生</strong>：当系统检测到派生失败并触发重派生时，重派生过程必须是幂等的——对同一组 Record 重复执行派生函数应该得到相同的结果。这依赖于 L0 不变量 2（Memory 是派生）和不变量 3（证据集而非计数器）的共同保证。证据集的 UNIQUE 约束确保了重复写入不会导致权重翻倍，派生函数的确定性确保了重算结果的一致性。没有这两条保证，"重派生"本身可能引入新的不一致。</p>
+
+          <p>更完整的自愈机制需要一个<strong>端到端的完整性校验管线</strong>：定期（例如每天一次）扫描所有 Record，检查每条 Record 是否被至少一条 facet 引用（作为证据）。未被引用的 Record 意味着"原始证据存在但未被蒸馏"——这正是派生失败的信号。发现此类 orphan Record 后，系统应自动触发对该 Record 的重新提取（re-extract）和重新派生（re-derive），将结果与现有 facet 集合并。这种定期扫描的计算成本与 Record 总量成正比，在 append-only 的存储模型下是线性增长的，不会随 facet 数量指数膨胀。它为"永不拒写"提供了最后一道防线：即使写入管道在某个时间窗口内完全失败，定期的完整性校验也能在事后发现并修补遗漏。</p>
+        </section>
+
+        <section id="s6-6">
+          <h3>6.6 派生物的 freshness 与版本绑定</h3>
+
+          <p>"Memory 是派生"意味着 Summary 是 Facet 的派生视图。但派生物的 freshness 如何保证？当前常见的做法是夜间批量 rebuild Summary，白天增量只更新 Facet。这意味着一条 Facet 在上午 10 点被更新后，对应的 Summary 要到次日凌晨才反映这个变化——最长可能有一天的读延迟。</p>
+
+          <p>更微妙的是版本绑定：当白天触发了对某条 Facet 的增量更新，而 Summary 尚未 rebuild 时，Summary 的 <code>facetVersion</code>（记录它所基于的 Facet 版本）已经过期。下一个查询拿到的 Summary 是旧版本，但系统无法自动判断"这个 Summary 是否还 fresh"。</p>
+
+          <p>从数据库理论的角度，这正是<strong>物化视图维护</strong>（materialized view maintenance）的经典问题。Gupta 和 Mumick（1995）的研究区分了全量重算（full recomputation）和增量视图维护（incremental view maintenance, IVM）：前者简单但代价高昂，后者只应用增量变化，代价与变化量成正比而非与数据总量成正比 <sup><a href="#ref-62">[62]</a></sup>。在 Agent 记忆场景下，IVM 的挑战在于"变化"不是简单的行插入/删除，而是 facet 的置信度变化、证据集变化、模态转换——这些变化对 Summary 的影响可能是非线性的。例如，一条 facet 的置信度从 0.8 降到 0.3 可能不会改变 Summary 的内容（如果 Summary 中还有其他高置信度的同主题 facet），但如果这条 facet 是 Summary 的唯一来源，则 Summary 需要完全重写。</p>
+
+          <p>需要引入 surface-gated catch-up 机制——在用户下一次可感知的读取面（对话回复、早间简报生成）之前，强制 rebuild 受影响实体的 Summary，而不是死守固定 cron。这不是理论难题，但它是"派生"从静态概念变成动态运行保障的工程关键。</p>
+
+          <p>Nader, Schafe 和 LeDoux（2000）在 Nature 上发表的记忆再巩固（reconsolidation）研究为版本管理提供了认知科学的类比 <sup><a href="#ref-10">[10]</a></sup>：被提取的记忆会重新进入不稳定状态（labile state），在此窗口期内可以被修改、增强或削弱。Dudai（2012）将此扩展为"restless engram"理论——记忆从来不是"最终版本"，每次提取都是一次潜在的更新机会 <sup><a href="#ref-56">[56]</a></sup>。映射到 Agent 记忆系统：当一个 Summary 被读取（提取）时，它应该触发一次 freshness 检查——如果底层 Facet 已经变化，读取事件本身应该触发 Summary 的再派生（再巩固）。这将"读路径"从单纯的消费者变为 freshness 保障的触发器，与写路径形成更紧密的闭环。</p>
+
+          <p>从工程实现的角度，读触发的再派生需要一个<strong>乐观锁</strong>机制：Summary 携带 <code>facetVersion</code> 标记，读取时比较当前 Facet 的实际版本与 Summary 记录的版本。如果版本不一致，在读取面返回旧 Summary 的同时异步触发 rebuild——下一次读取就能拿到新版本。如果版本一致，直接返回缓存的 Summary，零额外开销。这种乐观策略保证了"最终一致性"而非"强一致性"——在大多数场景下这是可接受的，因为一条 Summary 延迟几秒更新通常不会影响 Agent 的决策质量。</p>
+
+          <p>bitemporal 版本绑定还引入了一个更微妙的问题：<strong>时间旅行查询的一致性</strong>。当用户问"系统在 2026 年 3 月 15 日相信什么"时，系统需要回溯到那个时间点的 Facet 版本，然后用那个版本的 Facet 重建 Summary。但如果 2026 年 3 月 15 日的 Summary 没有被快照保留（只有最新的 Summary），系统需要从 Facet 的 bitemporal 记录中重新派生——这要求派生函数在任何历史时间点上都是可重算的（L0 不变量 2 的强化版本）。在实践中，这意味着派生函数不能依赖任何不在 Facet 记录中的外部状态——包括当前时间、当前 LLM 的参数版本、或当前的 prompt template。任何时变的外部依赖都会破坏时间旅行查询的可重算性。</p>
+        </section>
+
+        <section id="s6-7">
+          <h3>6.7 元记忆的归属问题</h3>
+
+          <p>第 4 章讨论的 R_task 外锚解决了记忆系统的价值标尺问题，但还有一类"关于系统自身的记忆"没有明确的归属。例如，系统应该记住"对于客户 Carlos，所有发送邮件的动作都需要人工确认"——这不是一条关于 Carlos 的 semantic facet（它不描述 Carlos 的属性），也不是一条 procedural facet（它不是"怎么完成任务"的知识），更不是 reflective facet（它不是从多条经验中归纳的模式）。它是一条<strong>元记忆</strong>：系统对自身行为约束的认知。</p>
+
+          <p>元记忆可以进一步分为三个子类：</p>
+
+          <ol>
+            <li><strong>行为约束元记忆</strong>："对 Carlos 发邮件需要人工确认"——这是对特定实体的行为规则。</li>
+            <li><strong>能力边界元记忆</strong>："我不擅长处理法律文件"——这是对自身能力的自我评估。</li>
+            <li><strong>策略偏好元记忆</strong>："在不确定时优先保守决策"——这是对自身决策风格的设定。</li>
+          </ol>
+
+          <p>三者的共同特征是它们都具有<strong>反身性</strong>（self-reference）——它们是系统关于自身的知识，而非关于外部世界的知识。这使得它们在当前的 facet 体系中无法自然归类：facet 的设计假设知识是关于某个外部实体的，而元记忆的"实体"就是系统自己。</p>
+
+          <p>从认知科学的角度，元记忆（metamemory）的研究可以追溯到 Flavell（1979）关于元认知（metacognition）的开创性工作 <sup><a href="#ref-63">[63]</a></sup>。人类的元认知系统包括两个核心功能：(1) <strong>监控</strong>——对自身认知过程的实时评估（"我对这个答案有多大把握？"）；(2) <strong>控制</strong>——基于监控结果调整认知策略（"我不太确定，所以应该查一下"）。映射到 Agent 记忆系统：元记忆的"监控"功能对应系统对自身记忆状态的感知（"我对客户 X 的了解是否完整？"），"控制"功能对应基于这种感知调整记忆策略（"信息不完整，应该主动向用户确认"）。当前框架的 L2 策略平面隐含了"控制"功能（record_policy、encode_policy 等），但缺少显式的"监控"功能——系统没有一种机制来评估"我的记忆库对当前任务的覆盖度如何"。</p>
+
+          <p>Letta 在 2025-2026 年推出的 <strong>Context Constitution</strong> <sup><a href="#ref-19">[19]</a></sup> 正是对元记忆问题的一种工程回应。Context Constitution 是一组规则，定义了 Agent 如何管理自己的上下文——什么信息可以进入核心记忆、什么时候触发记忆整理、什么条件下需要人工确认。这本质上是将元记忆从"数据层"提升到"策略层"——元记忆不是和其他 facet 放在一起的记忆条目，而是管理所有 facet 的策略配置。Letta 的 <strong>Context Repositories</strong>（基于 Git 的记忆版本管理）进一步将元记忆的变更历史纳入了版本控制——你可以回溯"Agent 在三天前的自我管理规则是什么"，这与 L0 的 bitemporal 精神一致。</p>
+
+          <p>"Reflective Memory Management"（ACL 2025 <sup><a href="#ref-60">[60]</a></sup>）提出了类似的思路：反思性记忆管理（包括元认知）应该作为一个独立的管理层存在，与被管理的记忆正交。"Constitutional Memory Architecture" <sup><a href="#ref-55">[55]</a></sup> 则将这一思路推向极致：整个记忆管理策略被表达为一组可形式化验证的"宪法条款"，每条条款都是一个对记忆操作的约束——相当于将元记忆从隐式的 L2 策略提升为显式的、可审计的规则集。</p>
+
+          <p>这个问题与 <a href="#s6-2">§6.2</a> 的 procedural 记忆空缺密切相关——元记忆和 procedural 都涉及"系统如何行动"，它们可能共享同一种底层表达。但目前没有确定的答案。</p>
+        </section>
+
+        <section id="s6-8">
+          <h3>6.8 与 LLM 工作记忆的边界</h3>
+
+          <p>LLM 的上下文窗口本身就是一种工作记忆——它承载着"当前正在进行的思考"。本框架处理的是长期持久层。但短期工作记忆（"我刚才正在思考什么"）该不该也走 observe → reflect 路径？如果走，开销大；如果不走，两套记忆并存又有一致性问题——长期层记得"Hans 的付款周期是 30 天"，但当前上下文里还残留着旧对话里的"45 天"，两套信息打架。</p>
+
+          <p>Baddeley（2000）在工作记忆模型中增加的<strong>情景缓冲区</strong>（episodic buffer）提供了一个认知科学的参考 <sup><a href="#ref-53">[53]</a></sup>。episodic buffer 是一个容量有限的系统，负责将来自不同来源的信息（语音回路、视空间画板、长时记忆）整合为统一的情景表征。它的关键特征是：(1) 容量有限（约 4±1 个组块，Cowan, 2001 <sup><a href="#ref-4">[4]</a></sup>）；(2) 双向连接长时记忆；(3) 由中央执行系统控制。episodic buffer 的存在意味着"工作记忆"和"长期记忆"之间不是简单的"复制"关系，而是一个有选择性的、受控的双向通道——长期记忆中的某些内容被激活进入工作记忆，工作记忆中的某些内容被巩固进入长期记忆，但两个系统各自维持独立的状态。</p>
+
+          <p>映射到 Agent 架构，LLM 的上下文窗口扮演了 episodic buffer 的角色——它是一个容量有限的整合空间，将当前感知（用户输入）、短期记忆（对话历史）和长期记忆（检索结果）绑定为统一的推理基础。这意味着 LLM 上下文窗口与外部长期记忆之间的边界，不应该是"两套独立系统"，而应该是"一个有明确出入规则的缓冲区"。</p>
+
+          <p>这个缓冲区的"出入规则"可以用三个机制来工程化：</p>
+
+          <ol>
+            <li><strong>入规则（consolidation-in）</strong>：什么信息从长期记忆进入上下文窗口？答案由 <code>⊕_budget</code> 算子决定——在 token 预算下选择边际价值最高的 facet 子集。这对应 episodic buffer 中"从长时记忆中激活相关信息"的过程。</li>
+            <li><strong>出规则（consolidation-out）</strong>：什么信息从上下文窗口回到长期记忆？答案由"会话结束批量蒸馏"决定——在会话结束或语义段落结束时，将当前上下文中的增量信息蒸馏为 facet 写入 L0。这对应 episodic buffer 中"将工作记忆内容巩固到长时记忆"的过程。</li>
+            <li><strong>一致性规则（coherence enforcement）</strong>：当上下文窗口中的信息与长期记忆矛盾时（如上下文中残留"45 天"而长期记忆已更新为"30 天"），系统应自动注入一条纠正性上下文（"注意：最新信息为 30 天"），而非让两套信息打架。这对应 episodic buffer 中"由中央执行系统解决冲突"的功能。</li>
+          </ol>
+
+          <p>一个可能的方向是把短期工作记忆保留在 LLM 自己的上下文里，只在"会话结束"或"语义段落结束"时批量蒸馏到长期层。这样短期与长期之间通过显式的"会话结束批量蒸馏"接缝清晰隔离，各管各的生命周期。但这仍有边界情况——如果一次会话特别长，跨越了多个语义段落，蒸馏时点如何选择？如果用户在会话中途换了一个话题又换回来，长期记忆的更新是否应该实时？</p>
+
+          <p>最新研究提出了更激进的方案。"ENGRAM"（2025）和"H-MEM"（2025 <sup><a href="#ref-61">[61]</a></sup>）探索了将记忆管理直接嵌入 LLM 推理循环的可能性——不是在推理之外维护一个独立的记忆系统，而是在 LLM 的每一步推理中同步更新记忆状态。这消除了两套系统的一致性问题，但代价是将记忆管理的计算成本绑定到了每一次推理调用上。"Memory for Autonomous LLM Agents" 综述 <sup><a href="#ref-54">[54]</a></sup> 将这一方向称为"memory-in-the-loop"范式，与本文所描述的"memory-beside-the-loop"范式形成了鲜明对比。</p>
+
+          <p>两种范式的深层差异在于<strong>记忆操作的因果位置</strong>。memory-beside-the-loop 范式中，记忆系统是推理过程的外部设施——推理引擎通过 API 调用记忆，记忆系统独立运行，两者通过接口解耦。memory-in-the-loop 范式中，记忆操作是推理过程的内在组成部分——每一步推理都可能同时读取和更新记忆，两者在计算图中深度耦合。前者的工程优势是模块化和可替换性（换 LLM 不影响记忆系统，换记忆系统不影响 LLM），后者的理论优势是一致性和最优性（记忆管理与推理目标联合优化）。</p>
+
+          <p>两种范式各有优劣，目前没有定论。本文的架构选择 memory-beside-the-loop，因为它与三层分离的设计哲学更一致——L0/L1/L2 的独立可替换性依赖于记忆系统与推理引擎之间的接口边界。但随着 LLM 推理能力的增强和计算成本的下降，memory-in-the-loop 范式可能会在特定场景（如需要极高一致性的实时对话 Agent）中展现出优势。</p>
+        </section>
+
+        <section id="s6-9">
+          <h3>6.9 Benchmark 的碎片化与可比性困境</h3>
+
+          <p>2025-2026 年涌现了大量 Agent 记忆的评测基准：LoCoMo（长对话记忆）、LongMemEval（长上下文记忆评估）、DMR（动态记忆推理）、MemoryAgentBench、MemBench、MemoryArena。然而，这些基准之间几乎没有可比性——每个基准评测的记忆维度不同（有的测事实召回、有的测时间推理、有的测跨会话一致性）、使用的对话数据不同、评估指标不同。</p>
+
+          <p>具体而言，当前主流基准的评测维度可以归纳为以下几类：</p>
+
+          <table>
+            <thead>
+              <tr>
+                <th>基准</th>
+                <th>核心评测维度</th>
+                <th>评测方法</th>
+                <th>局限性</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>LoCoMo</td>
+                <td>长对话事实召回、时间推理</td>
+                <td>QA 任务 + F1</td>
+                <td>不测跨会话一致性</td>
+              </tr>
+              <tr>
+                <td>LongMemEval</td>
+                <td>多轮对话中的信息保持</td>
+                <td>检索准确率</td>
+                <td>不测主动推理能力</td>
+              </tr>
+              <tr>
+                <td>DMR</td>
+                <td>动态记忆推理（多跳）</td>
+                <td>推理链准确率</td>
+                <td>不测遗忘策略</td>
+              </tr>
+              <tr>
+                <td>MemoryAgentBench</td>
+                <td>端到端 Agent 任务完成率</td>
+                <td>任务成功率</td>
+                <td>不隔离记忆组件的贡献</td>
+              </tr>
+              <tr>
+                <td>MemBench</td>
+                <td>记忆系统性能基准</td>
+                <td>多维度综合</td>
+                <td>偏向特定架构假设</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <p>这种碎片化反映了一个更深层的问题：<strong>我们还没有就"什么是好的 Agent 记忆"达成共识</strong>。LongMemEval 上得分最高的系统（MemoryOS 的 +49.11% F1）未必在 MemoryAgentBench 上也最好——因为它优化的是特定基准上的特定维度。这与本文第 4 章的论证形成了呼应：如果没有一个统一的 R_task 来定义"好"，每个系统都会朝各自认为"好"的方向优化，最终导致基准得分不可比。</p>
+
+          <p>当前需要的不是更多的基准，而是一个<strong>基准之上的元框架</strong>——一种将不同基准的评测维度映射到统一价值函数空间的方法。本文提出的 R_task 外锚框架可以充当这个元框架的角色：每个基准的评测维度（事实召回率、时间推理准确率、跨会话一致性）都可以被表达为 R_task 的一个分量，从而在统一的标尺下比较不同系统在不同维度上的表现。更具体地说，一个理想的 Agent 记忆基准应该同时测量以下维度，并将它们映射到统一的 R_task 空间：</p>
+
+          <ol>
+            <li><strong>事实召回</strong>（episodic → semantic 的派生质量）</li>
+            <li><strong>时间推理</strong>（bitemporal 的工程有效性）</li>
+            <li><strong>矛盾处理</strong>（仲裁机制的正确性）</li>
+            <li><strong>跨会话一致性</strong>（派生物 freshness 的工程保障）</li>
+            <li><strong>主动遗忘</strong>（forget_policy 的效果）</li>
+            <li><strong>压缩效率</strong>（reflective facet 的预测增益）</li>
+          </ol>
+
+          <p>只有当一个基准同时覆盖这六个维度，并以统一的 R_task 作为聚合标尺时，不同系统之间的比较才有意义。</p>
+
+          <p>另一个被忽视的评测维度是<strong>计算成本归一化</strong>。当前的基准几乎全部只测量效果（accuracy, F1）而不测量成本（token 消耗、延迟、存储开销）。一个在 LoCoMo 上 F1 高 5% 但 token 消耗高 3 倍的系统，是否真的优于另一个系统？在实际部署中，成本往往比效果更早成为瓶颈。理想的基准应该报告 cost-effectiveness 比率——每单位 R_task 提升所需的边际成本——而非孤立的效果指标。这与第 3 章的统一价值函数精神一致：记忆管理的本质是受限资源下的序贯决策，脱离资源约束谈效果是没有意义的。</p>
+
+          <p>此外，当前基准大多基于合成对话或公开数据集，而非真实世界的长期 Agent 部署。合成数据的危险在于它隐含了"标准答案"的假设——每条对话都有一个确定的"正确记忆"可以被召回。但真实世界中，"正确记忆"往往是模糊的、有争议的、随时间演化的——这恰恰是本文框架所强调的 Living Document 特性。一个真正能评测 Agent 记忆系统的基准，应该包含矛盾证据、信念修正、时间衰减等真实世界的复杂性，而非简单的"问-答"对齐。</p>
+
+          <p>更深层的评测缺失在于<strong>策略评估</strong>。当前基准全部评测的是"系统记住了什么"（存储和检索的效果），但没有评测"系统如何决定记什么"（策略的质量）。一个好的 Agent 记忆基准应该能够回答以下问题：(1) 系统的遗忘策略是否保留了对长期 R_task 最有价值的 facet？(2) 系统的反思策略是否成功地从低层 facet 中提取了高层模式？(3) 系统的编码深度选择是否在存储成本和检索收益之间取得了最优权衡？这些问题的答案需要长期的、纵向的（longitudinal）评测——不是一次性地问"你记住了吗"，而是在数周或数月的时间跨度内持续追踪记忆库的演化，评估每个策略决策对最终 R_task 的累积影响。当前没有一个基准具备这种纵向评测能力，这是一个显式的评测基础设施缺口。</p>
+        </section>
+
+        <section id="s6-10">
+          <h3>6.10 全文总结：从 Living Document 到可复用基础设施</h3>
+
+          <p>本文从"Agent 记忆应该是一份 Living Document of Beliefs"这个定义出发，推导出一个三层正交的记忆系统架构。六章的论证链条是：定义问题 → 推导三层 → 建立价值函数 → 外部锚定与压缩边界 → 读路径代数化 → 标注边界。</p>
+
+          <p>回顾三层各自只承诺了最少的约束：</p>
+
+          <ul>
+            <li><strong>L0 只承诺五条不变量</strong>：Record 不可变、Memory 是派生、证据集而非计数器、永不拒写、仲裁即证据。这五条做到极致，足以承载任何上层认知系统，无论它处理的是人际关系、知识图谱、任务轨迹还是科学假说。</li>
+            <li><strong>L1 只提供四轴正交空间</strong>：cognitive type × entity ontology × bitemporal × modality。四轴交叉后足以表达不同场景的认知本体，而每种类型挂载的派生/衰减/投影函数形状统一，保证了跨类型的可比性和可组合性。</li>
+            <li><strong>L2 只暴露四个策略接口</strong>：record_policy / encode_policy / forget_policy / reflect_policy。每个接口是纯函数，由外部业务目标 R_task 锚定。策略可以独立演化、独立替换、独立评估。</li>
+            <li><strong>对外契约只三动词一查询</strong>：observe / reflect / forget + recall。没有 add_fact（事实只能派生）、没有 update_fact（更新只能由新证据触发）、forget 不是 delete（合规可审计）、recall 是带预算的代数表达而非纯查询。</li>
+          </ul>
+
+          <p>这四组约束的共同主题是<strong>放手</strong>——内核放手不管类型，类型放手不管策略，策略平面放手承认 R_task 不可通用，对外契约放手让 Agent 不再直接增删 fact。每一次放手，都让这套东西离"基础设施"近一步。</p>
+
+          <p>2025-2026 年的学术与工程进展印证了这条路径的方向性正确。MemoryOS 的 heat-based 晋升/降级机制验证了 L2 策略可替换的价值——同一个 L0/L1 基底可以承载完全不同的遗忘策略。Mem0 的 2026 算法大修证明了写入侧的提取策略可以独立于存储层演进。Letta 的 Context Constitution 和 Agent File (.af) 格式探索了元记忆和跨实例记忆持久化的工程路径。GraphRAG 被收编为代数算子的事实验证了"算子组合优于黑盒封装"的设计哲学。学术界的综合综述 <sup><a href="#ref-54">[54]</a></sup><sup><a href="#ref-59">[59]</a></sup> 开始收敛到与本文相似的分层视角——episodic/semantic/procedural 的三层分类法与 L1 的 cognitive type 轴高度对应。</p>
+
+          <p>但本章标注的开放问题——实体共指、procedural 形态空缺、多 Agent 归因、选择偏差、派生自愈、freshness 保证、元记忆归属、工作记忆边界——没有一个是当前框架能独立解决的。它们需要认知科学、数据库理论、博弈论和系统工程的交叉努力。本文的贡献不是解决了这些问题，而是为这些问题提供了一个<strong>精确的坐标系</strong>——当你知道一个问题在三层架构的哪个位置、它违反了哪条不变量、它需要哪个维度的理论突破时，问题就从"模糊的难"变成了"可定位的难"。</p>
+
+          <p>展望未来，互补学习系统（CLS）理论的最新更新（Kumaran et al., 2016 <sup><a href="#ref-57">[57]</a></sup>）指出了一个值得期待的方向：智能 Agent 可能需要的不是一套记忆系统，而是<strong>多套互补的记忆系统</strong>——一套快速编码新经验（对应 L0 的 Record 不可变 + 永不拒写），一套缓慢整合结构化知识（对应 reflective facet 的离线派生），一套从行为结果中学习策略（对应 procedural 记忆的空缺）。这三套系统各自有不同的学习速率、容量限制和遗忘曲线，但共享同一个证据基底（L0 的 Record ledger）。本文的三层架构为这种多系统整合提供了框架性的骨架，但每个系统的具体机制——特别是 procedural 系统的学习算法和元记忆系统的自省机制——仍然是开放的研究课题。</p>
+
+          <p>在工程路径上，最紧迫的下一步工作是：(1) 为 procedural 记忆设计一个可操作的 facet 形态，使其能自然地挂载到 L1 的 cognitive type 轴上；(2) 在 L2 的四个策略接口中引入"监控"维度——让策略函数能感知记忆库的整体状态（覆盖度、一致性、freshness），而不仅仅是单条 facet 的价值；(3) 为 <code>⊕_budget</code> 的 scorer 设计一个端到端的训练流程，使 R_task 的长期反馈能直接反向传播到检索排序的权重中。这三项工作都不需要修改 L0 的五条不变量——它们是在现有架构骨架上的增量填充，而非架构重构。这正是三层分离的终极价值：当新问题出现时，你不需要推倒重来，只需要在正确的层上填充正确的机制。</p>
+
+          <p>真正的"通用"从来不是功能堆叠，而是<strong>约束的清晰</strong>。在 L0 上承诺什么不会被破坏，在 L1 上承诺什么类型可被表达，在 L2 上承诺什么决策可被替换，在对外契约上承诺什么语义不会漂移。约束清晰，扩展自由；扩展自由，组件才有可能跨垂类复用而不退化为又一个项目级实现。这就是 Agent 记忆系统从 Living Document 走向可复用基础设施的完整路径。</p>
+        </section>
+
+        <section class="references" id="references">
+          <details>
+            <summary><h3>参考文献</h3></summary>
+            <ol class="references__list">
+            <li data-ref="[1]" id="ref-1">Tulving, E. (2002). Episodic memory: From mind to brain. <em>Annual Review of Psychology</em>, 53, 1–25. <a href="https://pubmed.ncbi.nlm.nih.gov/11752477/">URL</a></li>
+            <li data-ref="[2]" id="ref-2">Baddeley, A.D. &amp; Hitch, G. (1974). Working memory. <em>Psychology of Learning and Motivation</em>, 8, 47–89. <a href="https://doi.org/10.1016/S0079-7421(08)60452-1">URL</a></li>
+            <li data-ref="[3]" id="ref-3">Miller, G.A. (1956). The magical number seven, plus or minus two: Some limits on our capacity for processing information. <em>Psychological Review</em>, 63(2), 81–97. <a href="https://psychclassics.yorku.ca/Miller/">URL</a></li>
+            <li data-ref="[4]" id="ref-4">Cowan, N. (2001). The magical number 4 in short-term memory: A reconsideration of mental storage capacity. <em>Behavioral and Brain Sciences</em>, 24(1), 87–114. <a href="https://doi.org/10.1017/S0140525X01000020">URL</a></li>
+            <li data-ref="[5]" id="ref-5">McClelland, J.L., McNaughton, B.L. &amp; O'Reilly, R.C. (1995). Why there are complementary learning systems in the hippocampus and neocortex. <em>Psychological Review</em>, 102(3), 419–457. <a href="https://doi.org/10.1037/0033-295X.102.3.419">URL</a></li>
+            <li data-ref="[6]" id="ref-6">Bartlett, F.C. (1932). <em>Remembering: A Study in Experimental and Social Psychology</em>. Cambridge University Press. <a href="https://en.wikipedia.org/wiki/Remembering_(book)">URL</a></li>
+            <li data-ref="[7]" id="ref-7">van Kesteren, M.T.R. et al. (2012). How schema and novelty augment memory formation. <em>Trends in Neurosciences</em>, 35(5), 211–219. <a href="https://doi.org/10.1016/j.tins.2012.01.007">URL</a></li>
+            <li data-ref="[8]" id="ref-8">Johnson, M.K. &amp; Raye, C.L. (1981). Reality monitoring. <em>Psychological Review</em>, 88, 67–85. <a href="https://doi.org/10.1037/0033-295X.88.1.67">URL</a></li>
+            <li data-ref="[9]" id="ref-9">Ebbinghaus, H. (1885). <em>Über das Gedächtnis</em>. Duncker &amp; Humblot. <a href="https://psychclassics.yorku.ca/Ebbinghaus/index.htm">URL</a></li>
+            <li data-ref="[10]" id="ref-10">Nader, K., Schafe, G.E. &amp; LeDoux, J.E. (2000). Fear memories require protein synthesis in the amygdala for reconsolidation after retrieval. <em>Nature</em>, 406, 722–726. <a href="https://doi.org/10.1038/35015072">URL</a></li>
+            <li data-ref="[11]" id="ref-11">Snodgrass, R.T. (1999). <em>Developing Time-Oriented Database Applications in SQL</em>. Morgan Kaufmann. <a href="https://www2.cs.arizona.edu/~rts/tdbbook.pdf">URL</a></li>
+            <li data-ref="[12]" id="ref-12">Fowler, M. Event Sourcing. <a href="https://martinfowler.com/eaaDev/EventSourcing.html">URL</a></li>
+            <li data-ref="[13]" id="ref-13">Parnas, D.L. (1972). On the criteria to be used in decomposing systems into modules. <em>Communications of the ACM</em>, 15(12), 1053–1058. <a href="https://doi.org/10.1145/361598.361623">URL</a></li>
+            <li data-ref="[14]" id="ref-14">Codd, E.F. (1970). A relational model of data for large shared data banks. <em>Communications of the ACM</em>, 13(6), 377–387. <a href="https://doi.org/10.1145/362384.362685">URL</a></li>
+            <li data-ref="[15]" id="ref-15">O'Neil, P. et al. (1996). The log-structured merge-tree. <em>Acta Informatica</em>, 33(4), 351–385. <a href="https://doi.org/10.1007/s007780050006">URL</a></li>
+            <li data-ref="[16]" id="ref-16">Helland, P. (2015). Immutability changes everything. <em>CIDR '15</em>. <a href="https://www.cidrdb.org/cidr2015/Papers/CIDR15_Paper16.pdf">URL</a></li>
+            <li data-ref="[17]" id="ref-17">Gupta, A. &amp; Mumick, I.S. (1999). <em>Materialized Views: Techniques, Implementations, and Applications</em>. MIT Press. <a href="https://doi.org/10.1007/BFb0000379">URL</a></li>
+            <li data-ref="[18]" id="ref-18">Mem0. <a href="https://mem0.ai">URL</a></li>
+            <li data-ref="[19]" id="ref-19">Letta (MemGPT). <a href="https://www.letta.com">URL</a>. Skill Learning, Context Constitution, Context Repositories, Agent File (.af).</li>
+            <li data-ref="[20]" id="ref-20">Zep/Graphiti. arXiv:2501.13956, 2025. <a href="https://arxiv.org/abs/2501.13956">URL</a></li>
+            <li data-ref="[21]" id="ref-21">MemoryOS. EMNLP 2025 Oral. <a href="https://github.com/BAI-LAB/MemoryOS">URL</a>. Heat-based Promotion/Demotion, +49.11% F1 on LoCoMo.</li>
+            <li data-ref="[22]" id="ref-22">GraphRAG. Microsoft. <a href="https://github.com/microsoft/graphrag">URL</a></li>
+            <li data-ref="[23]" id="ref-23">Cognee. <a href="https://www.cognee.ai">URL</a></li>
+            <li data-ref="[24]" id="ref-24">Shannon, C.E. (1948). A mathematical theory of communication. <em>Bell System Technical Journal</em>, 27(3), 379–423. <a href="https://people.math.harvard.edu/~ctm/home/text/others/shannon/entropy/entropy.pdf">URL</a></li>
+            <li data-ref="[25]" id="ref-25">Simon, H.A. (1956). Rational choice and the structure of the environment. <em>Psychological Review</em>, 63(2), 129–138. <a href="https://pages.ucsd.edu/~mckenzie/Simon1956PsychReview.pdf">URL</a></li>
+            <li data-ref="[26]" id="ref-26">Russell, S. (1995). Rationality and intelligence. <em>Proceedings of the 14th IJCAI</em>. <a href="https://people.eecs.berkeley.edu/~russell/papers/ijcai95-cnt.pdf">URL</a></li>
+            <li data-ref="[27]" id="ref-27">Rissanen, J. (1978). Modeling by shortest data description. <em>Automatica</em>, 14(5), 465–471. <a href="https://homepages.cwi.nl/~paulv/course-kc/mdlintro.pdf">URL</a></li>
+            <li data-ref="[28]" id="ref-28">Schmidhuber, J. (2009). Driven by compression progress. <em>Cognitive Science Monographs</em>. <a href="https://arxiv.org/abs/0812.4360">URL</a></li>
+            <li data-ref="[29]" id="ref-29">Shannon, C.E. (1959). Coding theorems for a discrete source with a fidelity criterion. <em>IRE National Convention Record</em>, Part 4, 142–163. <a href="https://web.stanford.edu/class/ee376a/files/2017-18/lecture_12.pdf">URL</a></li>
+            <li data-ref="[30]" id="ref-30">Tishby, N., Pereira, F.C. &amp; Bialek, W. (1999). The information bottleneck method. <em>Proceedings of the 37th Allerton Conference</em>. <a href="https://arxiv.org/abs/physics/0004057">URL</a></li>
+            <li data-ref="[31]" id="ref-31">Sutton, R.S. &amp; Barto, A.G. (2018). <em>Reinforcement Learning: An Introduction</em> (2nd ed.). MIT Press. <a href="http://incompleteideas.net/book/the-book-2nd.html">URL</a></li>
+            <li data-ref="[32]" id="ref-32">Auer, P., Cesa-Bianchi, N. &amp; Fischer, P. (2002). Finite-time analysis of the multiarmed bandit problem. <em>Machine Learning</em>, 47(2–3), 235–256. <a href="https://doi.org/10.1023/A:1013689704352">URL</a></li>
+            <li data-ref="[33]" id="ref-33">Rao, R.P.N. &amp; Ballard, D.H. (1999). Predictive coding in the visual cortex. <em>Nature Neuroscience</em>, 2(1), 79–87. <a href="https://doi.org/10.1038/1828">URL</a></li>
+            <li data-ref="[34]" id="ref-34">Friston, K. (2010). The free-energy principle: A unified brain theory? <em>Nature Reviews Neuroscience</em>, 11(2), 127–138. <a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC2666703">URL</a></li>
+            <li data-ref="[35]" id="ref-35">Sutton, R.S. (1988). Learning to predict by the methods of temporal differences. <em>Machine Learning</em>, 3(1), 9–44. <a href="https://doi.org/10.1007/BF00115009">URL</a></li>
+            <li data-ref="[36]" id="ref-36">Baddeley, A.D. (1992). Working memory. <em>Science</em>, 255(5044), 556–559. <a href="https://doi.org/10.1126/science.1736359">URL</a></li>
+            <li data-ref="[37]" id="ref-37">Nemhauser, G.L., Wolsey, L.A. &amp; Fisher, M.L. (1978). An analysis of approximations for maximizing submodular set functions—I. <em>Mathematical Programming</em>, 14(1), 265–294. <a href="https://doi.org/10.1007/BF01588971">URL</a></li>
+            <li data-ref="[38]" id="ref-38">Ng, A.Y., Harada, D. &amp; Russell, S. (1999). Policy invariance under reward transformations. <em>Proceedings of ICML</em>. <a href="https://ai.stanford.edu/~ang/papers/shaping-icml99.pdf">URL</a></li>
+            <li data-ref="[39]" id="ref-39">Atkinson, R.C. &amp; Shiffrin, R.M. (1968). Human memory: A proposed system and its control processes. In K.W. Spence &amp; J.T. Spence (Eds.), <em>The Psychology of Learning and Motivation</em>, Vol. 2. Academic Press. <a href="https://doi.org/10.1016/S0079-7421(08)60422-3">URL</a></li>
+            <li data-ref="[40]" id="ref-40">Goodhart, C.A.E. (1975). Problems of monetary management: The UK experience. In A.S. Courakis (Ed.), <em>Monetary Policy and Financial Activity</em>. Oxford University Press. <a href="https://en.wikipedia.org/wiki/Goodhart%27s_law">URL</a></li>
+            <li data-ref="[41]" id="ref-41">Campbell, D.T. (1979). Assessing the impact of planned social change. <em>Evaluation and Program Planning</em>, 2(1), 67–90. <a href="https://en.wikipedia.org/wiki/Campbell%27s_law">URL</a></li>
+            <li data-ref="[42]" id="ref-42">Russell, S. &amp; Norvig, P. (2020). <em>Artificial Intelligence: A Modern Approach</em> (4th ed.). Pearson. <a href="https://aima.cs.berkeley.edu/">URL</a></li>
+            <li data-ref="[43]" id="ref-43">Ng, A.Y. &amp; Russell, S. (2000). Algorithms for inverse reinforcement learning. <em>Proceedings of ICML</em>. <a href="https://ai.stanford.edu/~ang/papers/icml00-irl.pdf">URL</a></li>
+            <li data-ref="[44]" id="ref-44">Wolpert, D.H. &amp; Macready, W.G. (1997). No free lunch theorems for optimization. <em>IEEE Transactions on Evolutionary Computation</em>, 1(1), 67–82. <a href="https://doi.org/10.1109/4235.585893">URL</a></li>
+            <li data-ref="[45]" id="ref-45">Hutter, M. (2005). <em>Universal Artificial Intelligence: Sequential Decisions Based on Algorithmic Probability</em>. Springer. <a href="https://doi.org/10.1007/978-3-540-68677-4_4">URL</a></li>
+            <li data-ref="[46]" id="ref-46">Expected Value of Perfect Information (EVPI). UC Berkeley CS 188 Textbook. <a href="https://inst.eecs.berkeley.edu/~cs188/textbook/vpis/vpi.html">URL</a></li>
+            <li data-ref="[47]" id="ref-47">Pirolli, P. &amp; Card, S. (1999). Information foraging. <em>Psychological Review</em>, 106(4), 643–675. <a href="https://doi.org/10.1037/0033-295X.106.4.643">URL</a></li>
+            <li data-ref="[48]" id="ref-48">Tulving, E. &amp; Thomson, D.M. (1973). Encoding specificity and retrieval processes in episodic memory. <em>Psychological Review</em>, 80(5), 352–373. <a href="https://doi.org/10.1037/h0034683">URL</a></li>
+            <li data-ref="[49]" id="ref-49">Godden, D.R. &amp; Baddeley, A.D. (1975). Context-dependent memory in two natural environments. <em>British Journal of Psychology</em>, 66(3), 325–331. <a href="https://doi.org/10.1111/j.2044-8295.1975.tb01468.x">URL</a></li>
+            <li data-ref="[50]" id="ref-50">Watkins, M.J. (1975). Inhibition of recall with extralist memoranda. <em>Journal of Experimental Psychology: Human Learning and Memory</em>, 1(6), 686–700.</li>
+            <li data-ref="[51]" id="ref-51">Edge, D. et al. (2024). From local to global: A Graph RAG approach to query-focused summarization. arXiv:2404.16130. <a href="https://arxiv.org/abs/2404.16130">URL</a></li>
+            <li data-ref="[52]" id="ref-52">Cover, T. &amp; Thomas, C. <em>Elements of Information Theory</em>. Wiley, 2006.</li>
+            <li data-ref="[53]" id="ref-53">Baddeley, A.D. (2000). The episodic buffer: A new component of working memory? <em>Trends in Cognitive Sciences</em>, 4(11), 417–423. <a href="https://doi.org/10.1016/S1364-6613(00)01538-2">URL</a></li>
+            <li data-ref="[54]" id="ref-54">"Memory for Autonomous LLM Agents." arXiv:2603.07670, 2026. <a href="https://arxiv.org/abs/2603.07670">URL</a></li>
+            <li data-ref="[55]" id="ref-55">"Constitutional Memory Architecture." arXiv:2603.04740, 2026. <a href="https://arxiv.org/abs/2603.04740">URL</a></li>
+            <li data-ref="[56]" id="ref-56">Dudai, Y. (2012). The restless engram: Consolidations never end. <em>Annual Review of Neuroscience</em>, 35, 227–247.</li>
+            <li data-ref="[57]" id="ref-57">Kumaran, D., Hassabis, D. &amp; McClelland, J.L. (2016). What learning systems do intelligent agents need? <em>Trends in Cognitive Sciences</em>, 20(7), 512–534. <a href="https://doi.org/10.1016/j.tics.2016.05.007">URL</a></li>
+            <li data-ref="[58]" id="ref-58">"A-Mem: Agentic Memory." NeurIPS 2025. Zettelkasten-inspired dynamic linking memory.</li>
+            <li data-ref="[59]" id="ref-59">"LLM Agent Memory: A Survey from a Unified Representation." ACL ARR 2026.</li>
+            <li data-ref="[60]" id="ref-60">"Reflective Memory Management." ACL 2025.</li>
+            <li data-ref="[61]" id="ref-61">ENGRAM (2025), H-MEM (2025). Memory-in-the-loop architectures.</li>
+            <li data-ref="[62]" id="ref-62">Gupta, H. &amp; Mumick, I.S. (1995). Maintenance of materialized views: Problems, techniques, and applications. <em>IEEE Data Engineering Bulletin</em>.</li>
+            <li data-ref="[63]" id="ref-63">Flavell, J.H. (1979). Metacognition and cognitive monitoring. <em>American Psychologist</em>, 34(10), 906–911.</li>
+            <li data-ref="[64]" id="ref-64">Benchmarks: LoCoMo, LongMemEval, DMR, MemoryAgentBench, MemBench, MemoryArena.</li>
+            <li data-ref="[65]" id="ref-65">Shapley, L.S. (1953). A value for n-person games. <em>Annals of Mathematics</em>, 28(2), 307–317.</li>
+            <li data-ref="[66]" id="ref-66">Shoham, Y. &amp; Leyton-Brown, M. (2009). <em>Multiagent Systems: Algorithmic, Game-Theoretic, and Logical Foundations</em>. Cambridge University Press.</li>
+          </ol>
+          </details>
+        </section>
+
+      </article>
+    </main>
+  </div>
+
+  <nav class="article-pager">
+    <a href="chapter-5.html" class="article-pager__link">
+      <span class="article-pager__label">上一章</span>
+      <span class="article-pager__title">Recall as Algebra</span>
+    </a>
+  </nav>
+
+  <script src="script.js"></script>
+</body>
+</html>

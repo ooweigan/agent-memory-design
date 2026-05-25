@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{FULL_TITLE}} — Agent 记忆系统</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="progress-bar"></div>
+  <nav class="article-nav">
+    <a href="index.html" class="article-nav__back">返回系列</a>
+    <span class="article-nav__title">{{NAV_TITLE}}</span>
+    <button class="nav-toggle" aria-label="菜单" aria-expanded="false">
+      <span class="nav-toggle__bar"></span>
+      <span class="nav-toggle__bar"></span>
+      <span class="nav-toggle__bar"></span>
+    </button>
+  </nav>
+
+  <header class="article-hero">
+    <span class="article-hero__chapter">第{{CHAPTER_NUMBER}}章</span>
+    <h1 class="article-hero__title">{{FULL_TITLE}}</h1>
+    <p class="article-hero__meta">{{META}}</p>
+  </header>
+
+  <div class="article-layout">
+    <aside class="article-layout__sidebar">
+      <nav class="toc">
+        <p class="toc__title">目录</p>
+        <ul class="toc__list">
+{{TOC}}
+        </ul>
+      </nav>
+    </aside>
+
+    <main class="article-layout__content">
+
+{{CONTENT}}
+
+{{REFERENCES}}
+
+{{NAV_LINKS}}
+
+    </main>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
