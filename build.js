@@ -308,6 +308,52 @@ function buildChapter(chapterNum, chaptersData) {
   return html;
 }
 
+function buildTopic(topic, chaptersData) {
+  const mdPath = path.join(CONTENT_DIR, topic.file);
+  if (!fs.existsSync(mdPath)) {
+    log(`  ⚠ Missing: ${mdPath}`);
+    return null;
+  }
+
+  const raw = readFile(mdPath);
+  const { meta, content } = parseFrontMatter(raw);
+  const { body, referencesHtml } = extractReferences(content);
+
+  const fenceCount = (body.match(/^```/gm) || []).length;
+  if (fenceCount % 2 !== 0) {
+    log(`  ⚠ ${topic.file}: odd number of \`\`\` code fences (${fenceCount})`);
+  }
+
+  const contentHtml = markdownToHtml(body);
+  const toc = buildToc(contentHtml);
+
+  const navLinks = `      <nav class="article-pager">
+        <span></span>
+        <a href="index.html" class="article-pager__link article-pager__link--next">
+          <span class="article-pager__label">返回</span>
+          <span class="article-pager__title">系列首页</span>
+        </a>
+      </nav>`;
+
+  const template = readFile(path.join(TEMPLATE_DIR, 'article.html'));
+  const date = meta.date || topic.date || '';
+  const readingTime = meta.readingTime || topic.readingTime || '';
+  const metaStr = `程乾 · ${date} · 约 ${readingTime} 分钟`;
+
+  let html = template
+    .replace(/\{\{TITLE\}\}/g, meta.title || topic.title)
+    .replace(/\{\{NAV_TITLE\}\}/g, meta.navTitle || topic.title)
+    .replace(/\{\{CHAPTER_NUMBER\}\}/g, '专题')
+    .replace(/\{\{FULL_TITLE\}\}/g, meta.fullTitle || topic.fullTitle)
+    .replace(/\{\{META\}\}/g, metaStr)
+    .replace(/\{\{TOC\}\}/g, toc)
+    .replace(/\{\{CONTENT\}\}/g, function() { return contentHtml; })
+    .replace(/\{\{REFERENCES\}\}/g, function() { return referencesHtml; })
+    .replace(/\{\{NAV_LINKS\}\}/g, navLinks);
+
+  return html;
+}
+
 function buildIndex(chaptersData) {
   const template = readFile(path.join(TEMPLATE_DIR, 'index.html'));
 
@@ -321,12 +367,39 @@ function buildIndex(chaptersData) {
       </a>`;
   }).join('\n\n');
 
+  // Build topic cards
+  let topicSection = '';
+  if (chaptersData.topics && chaptersData.topics.length > 0) {
+    const topicCards = chaptersData.topics.map((topic, i) => {
+      return `      <a href="${topic.slug}.html" class="topic-card animate-in animate-delay-${i + 1}">
+        <span class="topic-card__badge">专</span>
+        <h2 class="topic-card__title">${topic.title}</h2>
+        <p class="topic-card__excerpt">${topic.excerpt}</p>
+        <p class="topic-card__meta">约 ${topic.readingTime} 分钟阅读 · ${topic.date}</p>
+      </a>`;
+    }).join('\n\n');
+
+    topicSection = `
+  </section>
+
+  <section class="section topics-section">
+    <div class="topics-section__header">
+      <span class="topics-section__label">Special Topics</span>
+      <h2 class="topics-section__title">专题</h2>
+      <p class="topics-section__subtitle">与系列主题相关的独立深度文章</p>
+    </div>
+    <div class="chapters-grid">
+${topicCards}
+    </div>`;
+  }
+
   return template
     .replace(/\{\{TITLE\}\}/g, chaptersData.title)
     .replace(/\{\{SUBTITLE\}\}/g, chaptersData.subtitle)
     .replace(/\{\{AUTHOR\}\}/g, chaptersData.author)
     .replace(/\{\{DATE\}\}/g, chaptersData.date)
-    .replace(/\{\{CHAPTERS\}\}/g, cards);
+    .replace(/\{\{CHAPTERS\}\}/g, cards)
+    .replace(/\{\{TOPICS\}\}/g, topicSection);
 }
 
 function copyPublicAssets() {
@@ -365,6 +438,18 @@ function build() {
     if (html) {
       fs.writeFileSync(path.join(DIST_DIR, `chapter-${ch.number}.html`), html, 'utf-8');
       log(`  ✓ chapter-${ch.number}.html`);
+    }
+  }
+
+  // Build topics
+  if (chaptersData.topics) {
+    for (const topic of chaptersData.topics) {
+      log(`  Building ${topic.slug}.html`);
+      const html = buildTopic(topic, chaptersData);
+      if (html) {
+        fs.writeFileSync(path.join(DIST_DIR, `${topic.slug}.html`), html, 'utf-8');
+        log(`  ✓ ${topic.slug}.html`);
+      }
     }
   }
 

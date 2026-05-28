@@ -52,5 +52,16 @@
       "excerpt": "诚实标注框架的极限：实体共指、procedural 形态、多 Agent 归因等九大开放问题。",
       "readingTime": "12"
     }
+  ],
+  "topics": [
+    {
+      "slug": "memory-as-model",
+      "file": "memory-as-model.md",
+      "title": "当记忆成为模型",
+      "fullTitle": "当记忆成为模型：Agent 记忆系统中策略层的模型化设计",
+      "excerpt": "借鉴 MeMo (Memory as Model) 理念，论证 Agent 记忆系统的策略层应由可训练的小型专用模型驱动。来自认知心理学、神经科学、行为科学和 AI/ML 的四重证据。",
+      "readingTime": "20",
+      "date": "2026-05-28"
+    }
   ]
 }
